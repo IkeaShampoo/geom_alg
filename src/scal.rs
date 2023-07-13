@@ -154,15 +154,14 @@ impl ops::Add for Scalar {
                 Scalar::Sum(lhs_rat + rhs_rat, new_terms)
             }
             (lhs, rhs) => {
-                /*
-                let (old_terms, new_term): (Vec<Scalar>, Scalar) =
-                    if let Scalar::Sum(lhs) = lhs { (lhs, rhs) }
-                    else if let Scalar::Sum(rhs) = rhs { (rhs, lhs) }
-                    else { (vec!{lhs}, rhs) };
-                let mut new_terms: Vec<Scalar>;
-
-                 */
-                lhs
+                let (rat, mut old_terms, new_term): (Rational, Vec<Scalar>, Scalar) =
+                    if let Scalar::Sum(lhs_rat, lhs) = lhs { (lhs_rat, lhs, rhs) }
+                    else if let Scalar::Sum(rhs_rat, rhs) = rhs { (rhs_rat, rhs, lhs) }
+                    else { (ZERO, vec!{lhs}, rhs) };
+                let mut i: usize = 0;
+                while old_terms[i] < new_term {i += 1;}
+                old_terms.insert(i, new_term);
+                Scalar::Sum(rat, old_terms)
             }
         }
     }
