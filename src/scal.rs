@@ -1,8 +1,10 @@
-use std::ops;
 use std::cmp;
+use std::fmt;
+use std::ops;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::convert;
+use std::fmt::Formatter;
 
 fn gcd(a: u32, b: u32) -> u32 {
     let mut x = a;
@@ -123,6 +125,22 @@ impl From<String> for Scalar {
 impl From<Rational> for Scalar {
     fn from(fraction: Rational) -> Self {
         Scalar::Rational(fraction)
+    }
+}
+
+impl fmt::Display for Scalar {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Scalar::Rational(s) => f.write_fmt(format_args!("({}/{})", s.n, s.d)),
+            Scalar::Variable(s) => f.write_str(s.as_str()),
+            Scalar::Sum(r, s) => {
+                for i in 0..s.len() {
+
+                }
+                todo!()
+            },
+            _ => todo!()
+        }
     }
 }
 
