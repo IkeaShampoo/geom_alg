@@ -1,10 +1,7 @@
 use std::cmp;
 use std::fmt;
 use std::ops;
-use std::cmp::Ordering;
 use std::collections::VecDeque;
-use std::convert;
-use std::fmt::Formatter;
 
 fn gcd(a: u32, b: u32) -> u32 {
     let mut x = a;
@@ -91,9 +88,23 @@ impl PartialOrd for Rational {
     }
 }
 
+impl fmt::Display for Rational {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.d == 1 { f.write_fmt(format_args!("{}", self.n)) }
+        else { f.write_fmt(format_args!("({}/{})", self.n, self.d)) }
+    }
+}
+
 #[derive(Clone, PartialEq, PartialOrd)]
 pub struct Exponential {
     b: Scalar, e: Rational
+}
+
+impl fmt::Display for Exponential {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.e == ONE { Scalar::fmt(&self.b, f) }
+        else { f.write_fmt(format_args!("({}^{})", self.b, self.e)) }
+    }
 }
 
 #[derive(Clone, PartialEq, PartialOrd)]
@@ -129,17 +140,30 @@ impl From<Rational> for Scalar {
 }
 
 impl fmt::Display for Scalar {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Scalar::Rational(s) => f.write_fmt(format_args!("({}/{})", s.n, s.d)),
+            Scalar::Rational(s) => Rational::fmt(s, f),
             Scalar::Variable(s) => f.write_str(s.as_str()),
             Scalar::Sum(r, s) => {
-                for i in 0..s.len() {
-
+                f.write_str("(")?;
+                if *r != ZERO {
+                    Rational::fmt(r, f)?;
+                    if s.len() > 0 { f.write_str(" + ")?; }
                 }
-                todo!()
+                for i in 0..s.len() {
+                    if i > 0 { f.write_str(" + ")?; }
+                    Scalar::fmt(&s[i],f)?;
+                }
+                f.write_str(")")
             },
-            _ => todo!()
+            Scalar::Product(s) => {
+                f.write_str("(")?;
+                for i in 0..s.len() {
+                    if i > 0 { f.write_str(" * ")?; }
+                    Exponential::fmt(&s[i], f)?;
+                }
+                f.write_str(")")
+            }
         }
     }
 }
@@ -151,6 +175,8 @@ impl ops::Add for Scalar {
             (Scalar::Rational(lhs), Scalar::Rational(rhs)) => Scalar::Rational(lhs + rhs),
             (Scalar::Rational(lhs), Scalar::Sum(rhs_rat, rhs)) => Scalar::Sum(lhs + rhs_rat, rhs),
             (Scalar::Sum(lhs_rat, lhs), Scalar::Rational(rhs)) => Scalar::Sum(lhs_rat + rhs, lhs),
+            (Scalar::Rational(lhs), rhs) => Scalar::Sum(lhs, vec![rhs]),
+            (lhs, Scalar::Rational(rhs)) => Scalar::Sum(rhs, vec![lhs]),
             (Scalar::Sum(lhs_rat, lhs), Scalar::Sum(rhs_rat, rhs)) => {
                 let mut lhs: VecDeque<Scalar> = VecDeque::from(lhs);
                 let mut rhs: VecDeque<Scalar> = VecDeque::from(rhs);
@@ -177,35 +203,14 @@ impl ops::Add for Scalar {
                     else if let Scalar::Sum(rhs_rat, rhs) = rhs { (rhs_rat, rhs, lhs) }
                     else { (ZERO, vec!{lhs}, rhs) };
                 let mut i: usize = 0;
-                while old_terms[i] < new_term {i += 1;}
+                let num_terms = old_terms.len();
+                while {
+                    if i < num_terms {old_terms[i] < new_term}
+                    else {false}
+                } {i += 1;}
                 old_terms.insert(i, new_term);
                 Scalar::Sum(rat, old_terms)
             }
         }
     }
 }
-/*
-
-    impl Add for SimpleScalar {
-        type Output = Self;
-
-        fn add(&self, rhs: &Self) -> Self::Output {
-            if let SimpleScalar::Rational(n, d) = self {
-                if let SimpleScalar::Rational(rhs_n, rhs_d) = rhs {
-                    let new_n: i32 = n * rhs_d as i32 + rhs_n * d as i32;
-                    let new_d: u32 = d * rhs_d;
-                    let gcd: u32 = gcd(*d, *rhs_d);
-                    SimpleScalar::Rational { n: (new_n / gcd as i32), d: new_d / gcd }
-                }
-            }
-            if let SimpleScalar::Sum(terms) = self {
-                if let SimpleScalar::Sum(rhs_terms) = self {
-                    let mut rhs_copy = rhs_terms.to_vec();
-                    SimpleScalar::Sum(terms.to_vec().append(&mut rhs_copy));
-                }
-            }
-            SimpleScalar::Sum(vec![*self, *rhs])
-        }
-    }
-
- */
