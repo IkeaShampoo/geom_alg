@@ -1,4 +1,5 @@
 use std::cmp;
+use std::cmp::Ordering;
 use std::fmt;
 use std::ops;
 use std::collections::VecDeque;
@@ -15,7 +16,7 @@ fn gcd(a: u32, b: u32) -> u32 {
     y
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Eq, Ord)]
 pub struct Rational { n: i32, d: u32 }
 const ZERO: Rational = Rational {n: 0, d: 1};
 const ONE: Rational = Rational {n: 1, d: 1};
@@ -33,6 +34,28 @@ impl Rational {
 impl From<i32> for Rational {
     fn from(integer: i32) -> Self {
         Rational {n: integer, d: 1 }
+    }
+}
+
+impl fmt::Display for Rational {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.d == 1 { f.write_fmt(format_args!("{}", self.n)) }
+        else { f.write_fmt(format_args!("({}/{})", self.n, self.d)) }
+    }
+}
+
+impl PartialEq<Self> for Rational {
+    fn eq(&self, other: &Self) -> bool {
+        (self.n == other.n) && (self.d == other.d)
+    }
+}
+
+impl PartialOrd for Rational {
+    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+        let diff_n: i32 = (self.clone() - other.clone()).n;
+        if diff_n < 0 { return Some(cmp::Ordering::Less); }
+        if diff_n > 0 { return Some(cmp::Ordering::Greater); }
+        Some(cmp::Ordering::Equal)
     }
 }
 
@@ -73,29 +96,7 @@ impl ops::Neg for Rational {
     }
 }
 
-impl PartialEq<Self> for Rational {
-    fn eq(&self, other: &Self) -> bool {
-        (self.n == other.n) && (self.d == other.d)
-    }
-}
-
-impl PartialOrd for Rational {
-    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
-        let diff_n: i32 = (self.clone() - other.clone()).n;
-        if diff_n < 0 { return Some(cmp::Ordering::Less); }
-        if diff_n > 0 { return Some(cmp::Ordering::Greater); }
-        Some(cmp::Ordering::Equal)
-    }
-}
-
-impl fmt::Display for Rational {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.d == 1 { f.write_fmt(format_args!("{}", self.n)) }
-        else { f.write_fmt(format_args!("({}/{})", self.n, self.d)) }
-    }
-}
-
-#[derive(Clone, PartialEq, PartialOrd)]
+#[derive(Clone, PartialEq, PartialOrd, Eq, Ord)]
 pub struct Exponential {
     b: Scalar, e: Rational
 }
@@ -107,24 +108,12 @@ impl fmt::Display for Exponential {
     }
 }
 
-#[derive(Clone, PartialEq, PartialOrd)]
+#[derive(Clone, PartialEq, PartialOrd, Eq, Ord)]
 pub enum Scalar {
     Variable(String),
     Rational(Rational),
     Sum(Rational, Vec<Scalar>),
     Product(Vec<Exponential>),
-}
-
-impl From<Scalar> for Exponential {
-    fn from(value: Scalar) -> Self {
-        Exponential {b: value, e: ONE}
-    }
-}
-
-fn to_ordering(n: i32) -> cmp::Ordering {
-    if n < 0 { cmp::Ordering::Less }
-    else if n > 0 { cmp::Ordering::Greater }
-    else { cmp::Ordering::Equal }
 }
 
 impl From<String> for Scalar {
@@ -136,6 +125,12 @@ impl From<String> for Scalar {
 impl From<Rational> for Scalar {
     fn from(fraction: Rational) -> Self {
         Scalar::Rational(fraction)
+    }
+}
+
+impl From<Scalar> for Exponential {
+    fn from(value: Scalar) -> Self {
+        Exponential {b: value, e: ONE}
     }
 }
 
@@ -168,6 +163,12 @@ impl fmt::Display for Scalar {
     }
 }
 
+impl PartialEq<Rational> for Scalar {
+    fn eq(&self, other: &Rational) -> bool {
+        *self == Scalar::from(*other)
+    }
+}
+
 impl ops::Add for Scalar {
     type Output = Self;
     fn add(self, rhs: Self) -> Self::Output {
@@ -180,18 +181,12 @@ impl ops::Add for Scalar {
             (Scalar::Sum(lhs_rat, lhs), Scalar::Sum(rhs_rat, rhs)) => {
                 let mut lhs: VecDeque<Scalar> = VecDeque::from(lhs);
                 let mut rhs: VecDeque<Scalar> = VecDeque::from(rhs);
-                let mut new_terms: Vec<Scalar> =
-                    Vec::with_capacity(lhs.len() + rhs.len());
-                let mut lhs_next: Option<Scalar>;
-                let mut rhs_next: Option<Scalar>;
-                while {
-                    lhs_next = lhs.pop_front();
-                    rhs_next = rhs.pop_front();
-                    lhs_next != None || rhs_next != None
-                } {
-                    if let (Some(lhs_next), Some(rhs_next)) = (lhs_next, rhs_next)  {
-                        new_terms.push(if lhs_next < rhs_next {lhs_next} else {rhs_next});
-                    }
+                let mut new_terms: Vec<Scalar> = Vec::with_capacity(lhs.len() + rhs.len());
+                while let (Some(lhs_next), Some(rhs_next)) = (lhs.front(), rhs.front()) {
+                    new_terms.push(
+                        if *lhs_next < *rhs_next {lhs.pop_front()} else {rhs.pop_front()}
+                            .expect("term should not be empty")
+                    );
                 }
                 new_terms.append(&mut Vec::from(lhs));
                 new_terms.append(&mut Vec::from(rhs));
@@ -210,6 +205,56 @@ impl ops::Add for Scalar {
                 } {i += 1;}
                 old_terms.insert(i, new_term);
                 Scalar::Sum(rat, old_terms)
+            }
+        }
+    }
+}
+
+impl ops::Mul for Scalar {
+    type Output = Self;
+    fn mul(self, rhs: Self) -> Self::Output {
+        const EXPECT_ERR: &str = "term should not be empty";
+        match (self, rhs) {
+            (Scalar::Product(lhs), Scalar::Product(rhs)) => {
+                let mut lhs: VecDeque<Exponential> = VecDeque::from(lhs);
+                let mut rhs: VecDeque<Exponential> = VecDeque::from(rhs);
+                let mut new_factors: Vec<Exponential> = Vec::with_capacity(lhs.len() + rhs.len());
+                while let (Some(lhs_next), Some(rhs_next)) = (lhs.front(), rhs.front()) {
+                    let order: Ordering = (lhs_next.b).cmp(&rhs_next.b);
+                    new_factors.push(
+                        if order == Ordering::Less {lhs.pop_front().expect(EXPECT_ERR)}
+                        else if order == Ordering::Greater {rhs.pop_front().expect(EXPECT_ERR)}
+                        else {
+                            let exponent = lhs_next.e + rhs_next.e;
+                            lhs.pop_front();
+                            Exponential{b: rhs.pop_front().expect(EXPECT_ERR).b, e: exponent}
+                        }
+                    );
+                }
+                new_factors.append(&mut Vec::from(lhs));
+                new_factors.append(&mut Vec::from(rhs));
+                Scalar::Product(new_factors)
+            }
+            (lhs, rhs) => {
+                if lhs == ZERO || rhs == ZERO { return Scalar::from(ZERO); }
+                if lhs == ONE { return rhs; }
+                if rhs == ONE { return lhs; }
+                let (mut old_factors, new_term): (Vec<Exponential>, Scalar) =
+                    if let Scalar::Product(lhs) = lhs { (lhs, rhs) }
+                    else if let Scalar::Product(rhs) = rhs { (rhs, lhs) }
+                    else { (vec![Exponential{b: lhs, e: ONE}], rhs) };
+                let mut i: usize = 0;
+                let num_terms = old_factors.len();
+                while i < num_terms {
+                    if old_factors[i].b < new_term { break; }
+                    else if new_term == old_factors[i].b {
+                        old_factors[i].e = old_factors[i].e + ONE;
+                        return Scalar::Product(old_factors);
+                    }
+                    i += 1;
+                }
+                old_factors.insert(i, Exponential{b: new_term, e: ONE});
+                Scalar::Product(old_factors)
             }
         }
     }
