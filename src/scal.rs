@@ -101,6 +101,12 @@ pub struct Exponential {
     b: Scalar, e: Rational
 }
 
+impl From<Scalar> for Exponential {
+    fn from(scalar: Scalar) -> Exponential {
+        Exponential{b: scalar, e: ONE}
+    }
+}
+
 impl fmt::Display for Exponential {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.e == ONE { Scalar::fmt(&self.b, f) }
@@ -125,12 +131,6 @@ impl From<String> for Scalar {
 impl From<Rational> for Scalar {
     fn from(fraction: Rational) -> Self {
         Scalar::Rational(fraction)
-    }
-}
-
-impl From<Scalar> for Exponential {
-    fn from(value: Scalar) -> Self {
-        Exponential {b: value, e: ONE}
     }
 }
 
@@ -210,6 +210,16 @@ impl ops::Add for Scalar {
     }
 }
 
+impl ops::Sub for Scalar {
+    type Output = Self;
+    fn sub(self, rhs: Self) -> Self::Output {
+        if let (Scalar::Rational(lhs), Scalar::Rational(rhs)) = (&self, &rhs) {
+            if *lhs == -rhs.clone() { return Scalar::from(ZERO); }
+        }
+        self + -rhs
+    }
+}
+
 impl ops::Mul for Scalar {
     type Output = Self;
     fn mul(self, rhs: Self) -> Self::Output {
@@ -242,7 +252,7 @@ impl ops::Mul for Scalar {
                 let (mut old_factors, new_term): (Vec<Exponential>, Scalar) =
                     if let Scalar::Product(lhs) = lhs { (lhs, rhs) }
                     else if let Scalar::Product(rhs) = rhs { (rhs, lhs) }
-                    else { (vec![Exponential{b: lhs, e: ONE}], rhs) };
+                    else { (vec![Exponential::from(lhs)], rhs) };
                 let mut i: usize = 0;
                 let num_terms = old_factors.len();
                 while i < num_terms {
@@ -253,9 +263,24 @@ impl ops::Mul for Scalar {
                     }
                     i += 1;
                 }
-                old_factors.insert(i, Exponential{b: new_term, e: ONE});
+                old_factors.insert(i, Exponential::from(new_term));
                 Scalar::Product(old_factors)
             }
         }
     }
 }
+
+impl ops::Div for Scalar {
+    type Output = Self;
+    fn div(self, rhs: Self) -> Self {
+        todo!()
+    }
+}
+
+impl ops::Neg for Scalar {
+    type Output = Self;
+    fn neg(self) -> Self {
+        Scalar::from(-ONE) * self
+    }
+}
+
