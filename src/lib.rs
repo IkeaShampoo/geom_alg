@@ -11,9 +11,10 @@ mod tests {
         let xa = x.clone() + a.clone();
         let ax = a.clone() + x.clone();
 
-        assert!(ax == xa);
+        //println!("{} is ordered {:?} than {}", x, x.cmp(&a), a);
+        assert_eq!(ax, xa);
         assert_eq!(ax.to_string(), xa.to_string());
-        assert_eq!(ax.to_string(), String::from("(5 + a)"));
+        assert_eq!(ax.to_string(), String::from("(a + 5)"));
     }
 
     #[test]
@@ -23,8 +24,8 @@ mod tests {
         let xa = x.clone() * a.clone();
         let ax = a.clone() * x.clone();
 
-        assert!(ax == xa);
+        assert_eq!(ax, xa);
         assert_eq!(ax.to_string(), xa.to_string());
-        assert_eq!(ax.to_string(), String::from("(5 * a)"));
+        assert_eq!(ax.to_string(), String::from("(a * 5)"));
     }
 }

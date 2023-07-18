@@ -16,7 +16,7 @@ fn gcd(a: u32, b: u32) -> u32 {
     y
 }
 
-#[derive(Copy, Clone, Eq, Ord)]
+#[derive(Copy, Clone, Eq, Ord, Debug)]
 pub struct Rational { n: i32, d: u32 }
 const ZERO: Rational = Rational {n: 0, d: 1};
 const ONE: Rational = Rational {n: 1, d: 1};
@@ -96,7 +96,7 @@ impl ops::Neg for Rational {
     }
 }
 
-#[derive(Clone, PartialEq, PartialOrd, Eq, Ord)]
+#[derive(Clone, PartialEq, PartialOrd, Eq, Ord, Debug)]
 pub struct Exponential {
     b: Scalar, e: Rational
 }
@@ -114,11 +114,11 @@ impl fmt::Display for Exponential {
     }
 }
 
-#[derive(Clone, PartialEq, PartialOrd, Eq, Ord)]
+#[derive(Clone, PartialEq, PartialOrd, Eq, Ord, Debug)]
 pub enum Scalar {
     Variable(String),
     Rational(Rational),
-    Sum(Rational, Vec<Scalar>),
+    Sum(Vec<Scalar>),
     Product(Vec<Exponential>),
 }
 
@@ -139,12 +139,8 @@ impl fmt::Display for Scalar {
         match self {
             Scalar::Rational(s) => Rational::fmt(s, f),
             Scalar::Variable(s) => f.write_str(s.as_str()),
-            Scalar::Sum(r, s) => {
+            Scalar::Sum(s) => {
                 f.write_str("(")?;
-                if *r != ZERO {
-                    Rational::fmt(r, f)?;
-                    if s.len() > 0 { f.write_str(" + ")?; }
-                }
                 for i in 0..s.len() {
                     if i > 0 { f.write_str(" + ")?; }
                     Scalar::fmt(&s[i],f)?;
@@ -174,37 +170,37 @@ impl ops::Add for Scalar {
     fn add(self, rhs: Self) -> Self::Output {
         match (self, rhs) {
             (Scalar::Rational(lhs), Scalar::Rational(rhs)) => Scalar::Rational(lhs + rhs),
-            (Scalar::Rational(lhs), Scalar::Sum(rhs_rat, rhs)) => Scalar::Sum(lhs + rhs_rat, rhs),
-            (Scalar::Sum(lhs_rat, lhs), Scalar::Rational(rhs)) => Scalar::Sum(lhs_rat + rhs, lhs),
-            (Scalar::Rational(lhs), rhs) => Scalar::Sum(lhs, vec![rhs]),
-            (lhs, Scalar::Rational(rhs)) => Scalar::Sum(rhs, vec![lhs]),
-            (Scalar::Sum(lhs_rat, lhs), Scalar::Sum(rhs_rat, rhs)) => {
+            (Scalar::Sum(lhs), Scalar::Sum(rhs)) => {
                 let mut lhs: VecDeque<Scalar> = VecDeque::from(lhs);
                 let mut rhs: VecDeque<Scalar> = VecDeque::from(rhs);
                 let mut new_terms: Vec<Scalar> = Vec::with_capacity(lhs.len() + rhs.len());
                 while let (Some(lhs_next), Some(rhs_next)) = (lhs.front(), rhs.front()) {
                     new_terms.push(
-                        if *lhs_next < *rhs_next {lhs.pop_front()} else {rhs.pop_front()}
-                            .expect("term should not be empty")
+                        match (lhs_next, rhs_next) {
+                            // Each sum will only have up to one rational term
+                            (Scalar::Rational(lhs_next), Scalar::Rational(rhs_next)) => {
+                                let rat_sum = *lhs_next + *rhs_next;
+                                lhs.pop_front();
+                                rhs.pop_front();
+                                Scalar::Rational(rat_sum)
+                            }
+                            (lhs_next, rhs_next) =>
+                                if *lhs_next < *rhs_next {lhs.pop_front()} else {rhs.pop_front()}
+                                    .expect("term should not be empty")
+                        }
                     );
                 }
                 new_terms.append(&mut Vec::from(lhs));
                 new_terms.append(&mut Vec::from(rhs));
-                Scalar::Sum(lhs_rat + rhs_rat, new_terms)
+                println!("Final sum: {:?}", new_terms);
+                Scalar::Sum(new_terms)
             }
             (lhs, rhs) => {
-                let (rat, mut old_terms, new_term): (Rational, Vec<Scalar>, Scalar) =
-                    if let Scalar::Sum(lhs_rat, lhs) = lhs { (lhs_rat, lhs, rhs) }
-                    else if let Scalar::Sum(rhs_rat, rhs) = rhs { (rhs_rat, rhs, lhs) }
-                    else { (ZERO, vec!{lhs}, rhs) };
-                let mut i: usize = 0;
-                let num_terms = old_terms.len();
-                while {
-                    if i < num_terms {old_terms[i] < new_term}
-                    else {false}
-                } {i += 1;}
-                old_terms.insert(i, new_term);
-                Scalar::Sum(rat, old_terms)
+                let (old_terms, new_term): (Vec<Scalar>, Scalar) =
+                    if let Scalar::Sum(lhs) = lhs { (lhs, rhs) }
+                    else if let Scalar::Sum(rhs) = rhs { (rhs, lhs) }
+                    else { (vec!{lhs}, rhs) };
+                Scalar::Sum(old_terms) + Scalar::Sum(vec![new_term])
             }
         }
     }
@@ -249,22 +245,11 @@ impl ops::Mul for Scalar {
                 if lhs == ZERO || rhs == ZERO { return Scalar::from(ZERO); }
                 if lhs == ONE { return rhs; }
                 if rhs == ONE { return lhs; }
-                let (mut old_factors, new_term): (Vec<Exponential>, Scalar) =
+                let (old_factors, new_factor): (Vec<Exponential>, Scalar) =
                     if let Scalar::Product(lhs) = lhs { (lhs, rhs) }
                     else if let Scalar::Product(rhs) = rhs { (rhs, lhs) }
                     else { (vec![Exponential::from(lhs)], rhs) };
-                let mut i: usize = 0;
-                let num_terms = old_factors.len();
-                while i < num_terms {
-                    if old_factors[i].b < new_term { break; }
-                    else if new_term == old_factors[i].b {
-                        old_factors[i].e = old_factors[i].e + ONE;
-                        return Scalar::Product(old_factors);
-                    }
-                    i += 1;
-                }
-                old_factors.insert(i, Exponential::from(new_term));
-                Scalar::Product(old_factors)
+                Scalar::Product(old_factors) * Scalar::Product(vec![Exponential::from(new_factor)])
             }
         }
     }
