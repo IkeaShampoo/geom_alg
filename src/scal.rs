@@ -1,8 +1,13 @@
 use std::cmp;
-use std::cmp::Ordering;
 use std::fmt;
 use std::ops;
 use std::collections::VecDeque;
+
+fn to_ordering(n: i32) -> cmp::Ordering {
+    if n < 0 { cmp::Ordering::Less }
+    else if n > 0 { cmp::Ordering::Greater }
+    else { cmp::Ordering::Equal }
+}
 
 fn gcd(a: u32, b: u32) -> u32 {
     let mut x = a;
@@ -96,7 +101,9 @@ impl ops::Neg for Rational {
     }
 }
 
-#[derive(Clone, PartialEq, PartialOrd, Eq, Ord, Debug)]
+
+
+#[derive(Clone, Eq, Ord, Debug)]
 pub struct Exponential {
     b: Scalar, e: Rational
 }
@@ -113,6 +120,32 @@ impl fmt::Display for Exponential {
         else { f.write_fmt(format_args!("({}^{})", self.b, self.e)) }
     }
 }
+
+impl PartialEq<Self> for Exponential {
+    fn eq(&self, other: &Self) -> bool {
+        (self.b == other.b) && (self.e == other.e)
+    }
+}
+
+impl PartialOrd for Exponential {
+    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+        match (self, other) {
+            (Exponential{b: Scalar::Rational(lb), e: le},
+             Exponential{b: Scalar::Rational(rb), e: re}) => {
+                let e_order = le.partial_cmp(re);
+                if e_order == Some(cmp::Ordering::Equal) {lb.partial_cmp(rb)}
+                else {e_order}
+            }
+            (Exponential{b: lb, e: le}, Exponential{b: rb, e: re}) => {
+                let b_order = lb.partial_cmp(rb);
+                if b_order == Some(cmp::Ordering::Equal) {le.partial_cmp(re)}
+                else {b_order}
+            }
+        }
+    }
+}
+
+
 
 #[derive(Clone, PartialEq, PartialOrd, Eq, Ord, Debug)]
 pub enum Scalar {
@@ -179,7 +212,7 @@ impl ops::Add for Scalar {
                         match (lhs_next, rhs_next) {
                             // Each sum will only have up to one rational term
                             (Scalar::Rational(lhs_next), Scalar::Rational(rhs_next)) => {
-                                let rat_sum = *lhs_next + *rhs_next;
+                                let rat_sum: Rational = *lhs_next + *rhs_next;
                                 lhs.pop_front();
                                 rhs.pop_front();
                                 Scalar::Rational(rat_sum)
@@ -226,16 +259,39 @@ impl ops::Mul for Scalar {
                 let mut rhs: VecDeque<Exponential> = VecDeque::from(rhs);
                 let mut new_factors: Vec<Exponential> = Vec::with_capacity(lhs.len() + rhs.len());
                 while let (Some(lhs_next), Some(rhs_next)) = (lhs.front(), rhs.front()) {
-                    let order: Ordering = (lhs_next.b).cmp(&rhs_next.b);
-                    new_factors.push(
-                        if order == Ordering::Less {lhs.pop_front().expect(EXPECT_ERR)}
-                        else if order == Ordering::Greater {rhs.pop_front().expect(EXPECT_ERR)}
+                    let order: cmp::Ordering = (lhs_next.b).cmp(&rhs_next.b);
+                    new_factors.push({
+                        if let (
+                            Exponential {
+                                b: Scalar::Rational(lb),
+                                e: le
+                            },
+                            Exponential {
+                                b: Scalar::Rational(rb),
+                                e: re
+                            }
+                        ) = (lhs_next, rhs_next) {
+                            if le == re {
+                                let rat_mul: Rational = *lb * *rb;
+                                let exp: Rational = *le;
+                                lhs.pop_front();
+                                rhs.pop_front();
+                                return Exponential { b: Scalar::Rational(rat_mul), e: exp };
+                            }
+                        }
+                        if order == cmp::Ordering::Less
+                            { lhs.pop_front().expect(EXPECT_ERR) }
+                        else if order == cmp::Ordering::Greater
+                            { rhs.pop_front().expect(EXPECT_ERR) }
                         else {
                             let exponent = lhs_next.e + rhs_next.e;
                             lhs.pop_front();
-                            Exponential{b: rhs.pop_front().expect(EXPECT_ERR).b, e: exponent}
+                            Exponential {
+                                b: rhs.pop_front().expect(EXPECT_ERR).b,
+                                e: exponent
+                            }
                         }
-                    );
+                    });
                 }
                 new_factors.append(&mut Vec::from(lhs));
                 new_factors.append(&mut Vec::from(rhs));
