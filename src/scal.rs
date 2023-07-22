@@ -3,12 +3,6 @@ use std::fmt;
 use std::ops;
 use std::collections::VecDeque;
 
-fn to_ordering(n: i32) -> cmp::Ordering {
-    if n < 0 { cmp::Ordering::Less }
-    else if n > 0 { cmp::Ordering::Greater }
-    else { cmp::Ordering::Equal }
-}
-
 fn gcd(a: u32, b: u32) -> u32 {
     let mut x = a;
     let mut y = b;
@@ -260,38 +254,44 @@ impl ops::Mul for Scalar {
                 let mut new_factors: Vec<Exponential> = Vec::with_capacity(lhs.len() + rhs.len());
                 while let (Some(lhs_next), Some(rhs_next)) = (lhs.front(), rhs.front()) {
                     let order: cmp::Ordering = (lhs_next.b).cmp(&rhs_next.b);
-                    new_factors.push({
+                    new_factors.push(
                         if let (
-                            Exponential {
-                                b: Scalar::Rational(lb),
-                                e: le
-                            },
-                            Exponential {
-                                b: Scalar::Rational(rb),
-                                e: re
-                            }
+                            &Exponential{b: Scalar::Rational(lb), e: le},
+                            &Exponential{b: Scalar::Rational(rb), e: re}
                         ) = (lhs_next, rhs_next) {
                             if le == re {
-                                let rat_mul: Rational = *lb * *rb;
-                                let exp: Rational = *le;
                                 lhs.pop_front();
                                 rhs.pop_front();
-                                return Exponential { b: Scalar::Rational(rat_mul), e: exp };
+                                Exponential{b: Scalar::Rational(lb * rb), e: le}
+                            }
+                            else {
+                                if order == cmp::Ordering::Less {
+                                    lhs.pop_front();
+                                    Exponential{b: Scalar::Rational(lb), e: le}
+                                }
+                                else if order == cmp::Ordering::Greater {
+                                    rhs.pop_front();
+                                    Exponential{b: Scalar::Rational(rb), e: re}
+                                }
+                                else {
+                                    lhs.pop_front();
+                                    rhs.pop_front();
+                                    Exponential{b: Scalar::Rational(lb), e: le + re}
+                                }
                             }
                         }
-                        if order == cmp::Ordering::Less
-                            { lhs.pop_front().expect(EXPECT_ERR) }
-                        else if order == cmp::Ordering::Greater
-                            { rhs.pop_front().expect(EXPECT_ERR) }
                         else {
-                            let exponent = lhs_next.e + rhs_next.e;
-                            lhs.pop_front();
-                            Exponential {
-                                b: rhs.pop_front().expect(EXPECT_ERR).b,
-                                e: exponent
+                            if order == cmp::Ordering::Less
+                                { lhs.pop_front().expect(EXPECT_ERR) }
+                            else if order == cmp::Ordering::Greater
+                                { rhs.pop_front().expect(EXPECT_ERR) }
+                            else {
+                                let exponent = lhs_next.e + rhs_next.e;
+                                lhs.pop_front();
+                                Exponential{b: rhs.pop_front().expect(EXPECT_ERR).b, e: exponent}
                             }
                         }
-                    });
+                    );
                 }
                 new_factors.append(&mut Vec::from(lhs));
                 new_factors.append(&mut Vec::from(rhs));
