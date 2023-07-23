@@ -15,6 +15,18 @@ fn gcd(a: u32, b: u32) -> u32 {
     y
 }
 
+fn iterative_mul<T: ops::Mul<Output = T> + Copy>(identity: T, base: T, exp: u32) -> T {
+    let mut product = identity;
+    let mut base_to_i = identity;
+    for i in 0..32 {
+        if ((exp >> i) & 1) == 1 {
+            product = product * base_to_i;
+        }
+        base_to_i = base_to_i * base;
+    }
+    product
+}
+
 #[derive(Copy, Clone, Eq, Ord, Debug)]
 pub struct Rational { n: i32, d: u32 }
 const ZERO: Rational = Rational {n: 0, d: 1};
@@ -25,7 +37,7 @@ impl Rational {
         let (n, d): (i32, u32) =
             if den < 0 {(num * -1, (den * -1) as u32)}
             else { (num, den as u32) };
-        let gcd_nd: u32 = gcd(n.abs() as u32, d);
+        let gcd_nd: u32 = gcd(n.unsigned_abs(), d);
         return Rational {n: n / (gcd_nd as i32), d: d / gcd_nd};
     }
 }
@@ -92,6 +104,17 @@ impl ops::Neg for Rational {
     type Output = Self;
     fn neg(self) -> Self::Output {
         Rational {n: -self.n, d:self.d}
+    }
+}
+
+impl ops::BitXor<i32> for Rational {
+    type Output = Self;
+    fn bitxor(self, exp: i32) -> Self {
+        let mut base = self;
+        if exp < 0 {
+            base = ONE / base;
+        }
+        iterative_mul(ONE, base, exp.unsigned_abs())
     }
 }
 
@@ -202,24 +225,26 @@ impl ops::Add for Scalar {
                 let mut rhs: VecDeque<Scalar> = VecDeque::from(rhs);
                 let mut new_terms: Vec<Scalar> = Vec::with_capacity(lhs.len() + rhs.len());
                 while let (Some(lhs_next), Some(rhs_next)) = (lhs.front(), rhs.front()) {
-                    new_terms.push(
-                        match (lhs_next, rhs_next) {
-                            // Each sum will only have up to one rational term
-                            (Scalar::Rational(lhs_next), Scalar::Rational(rhs_next)) => {
-                                let rat_sum: Rational = *lhs_next + *rhs_next;
-                                lhs.pop_front();
-                                rhs.pop_front();
-                                Scalar::Rational(rat_sum)
-                            }
-                            (lhs_next, rhs_next) =>
-                                if *lhs_next < *rhs_next {lhs.pop_front()} else {rhs.pop_front()}
-                                    .expect("term should not be empty")
+                    match (lhs_next, rhs_next) {
+                        // Each sum will only have up to one rational term
+                        (&Scalar::Rational(lhs_next), &Scalar::Rational(rhs_next)) => {
+                            lhs.pop_front();
+                            rhs.pop_front();
+                            let rat_sum = lhs_next + rhs_next;
+                            if rat_sum != ZERO {new_terms.push(Scalar::Rational(rat_sum));}
                         }
-                    );
+                        (lhs_next, rhs_next) => {
+                            new_terms.push(
+                                if *lhs_next < *rhs_next {lhs.pop_front()}
+                                else {rhs.pop_front()}
+                                    .expect("term should not be empty")
+                            );
+                        }
+                    }
                 }
                 new_terms.append(&mut Vec::from(lhs));
                 new_terms.append(&mut Vec::from(rhs));
-                println!("Final sum: {:?}", new_terms);
+                //println!("Final sum: {:?}", new_terms);
                 Scalar::Sum(new_terms)
             }
             (lhs, rhs) => {
@@ -247,51 +272,43 @@ impl ops::Mul for Scalar {
     type Output = Self;
     fn mul(self, rhs: Self) -> Self::Output {
         const EXPECT_ERR: &str = "term should not be empty";
+        fn get_new_factor(lhs: &mut VecDeque<Exponential>, rhs: &mut VecDeque<Exponential>,
+                                    order: cmp::Ordering, combined_exp: Rational) -> Exponential {
+            if order == cmp::Ordering::Less {
+                lhs.pop_front().expect(EXPECT_ERR)
+            }
+            else if order == cmp::Ordering::Greater {
+                rhs.pop_front().expect(EXPECT_ERR)
+            }
+            else {
+                lhs.pop_front();
+                Exponential{b: rhs.pop_front().expect(EXPECT_ERR).b, e: combined_exp}
+            }
+        }
+
         match (self, rhs) {
             (Scalar::Product(lhs), Scalar::Product(rhs)) => {
                 let mut lhs: VecDeque<Exponential> = VecDeque::from(lhs);
                 let mut rhs: VecDeque<Exponential> = VecDeque::from(rhs);
                 let mut new_factors: Vec<Exponential> = Vec::with_capacity(lhs.len() + rhs.len());
                 while let (Some(lhs_next), Some(rhs_next)) = (lhs.front(), rhs.front()) {
-                    let order: cmp::Ordering = (lhs_next.b).cmp(&rhs_next.b);
-                    new_factors.push(
-                        if let (
-                            &Exponential{b: Scalar::Rational(lb), e: le},
-                            &Exponential{b: Scalar::Rational(rb), e: re}
-                        ) = (lhs_next, rhs_next) {
-                            if le == re {
-                                lhs.pop_front();
-                                rhs.pop_front();
-                                Exponential{b: Scalar::Rational(lb * rb), e: le}
-                            }
-                            else {
-                                if order == cmp::Ordering::Less {
-                                    lhs.pop_front();
-                                    Exponential{b: Scalar::Rational(lb), e: le}
-                                }
-                                else if order == cmp::Ordering::Greater {
-                                    rhs.pop_front();
-                                    Exponential{b: Scalar::Rational(rb), e: re}
-                                }
-                                else {
-                                    lhs.pop_front();
-                                    rhs.pop_front();
-                                    Exponential{b: Scalar::Rational(lb), e: le + re}
-                                }
+                    let order = (lhs_next.b).cmp(&rhs_next.b);
+                    let exp = lhs_next.e + rhs_next.e;
+                    if let (
+                        &Exponential{b: Scalar::Rational(lb), e: le},
+                        &Exponential{b: Scalar::Rational(rb), e: re}
+                    ) = (lhs_next, rhs_next) {
+                        if le == re {
+                            lhs.pop_front();
+                            rhs.pop_front();
+                            let rat_mul = lb * rb;
+                            if rat_mul != ONE {
+                                new_factors.push(Exponential{b: Scalar::Rational(lb * rb), e: le});
                             }
                         }
-                        else {
-                            if order == cmp::Ordering::Less
-                                { lhs.pop_front().expect(EXPECT_ERR) }
-                            else if order == cmp::Ordering::Greater
-                                { rhs.pop_front().expect(EXPECT_ERR) }
-                            else {
-                                let exponent = lhs_next.e + rhs_next.e;
-                                lhs.pop_front();
-                                Exponential{b: rhs.pop_front().expect(EXPECT_ERR).b, e: exponent}
-                            }
-                        }
-                    );
+                        else { new_factors.push(get_new_factor(&mut lhs, &mut rhs, order, exp)); }
+                    }
+                    else { new_factors.push(get_new_factor(&mut lhs, &mut rhs, order, exp)); }
                 }
                 new_factors.append(&mut Vec::from(lhs));
                 new_factors.append(&mut Vec::from(rhs));
@@ -311,17 +328,34 @@ impl ops::Mul for Scalar {
     }
 }
 
+impl ops::BitXor<Rational> for Scalar {
+    type Output = Self;
+    fn bitxor(self, exp: Rational) -> Self::Output {
+        match self {
+            Scalar::Rational(x) => {
+                if exp.d == 1 { Scalar::Rational(x ^ exp.n) }
+                else { Scalar::Product(vec![Exponential{b: Scalar::Rational(x), e: exp}]) }
+            }
+            Scalar::Product(factors) => {
+                // should do the thing
+                todo!()
+            }
+            x => Scalar::Product(vec![Exponential{b: x, e: exp}])
+        }
+    }
+}
+
 impl ops::Div for Scalar {
     type Output = Self;
     fn div(self, rhs: Self) -> Self {
-        todo!()
+        self * (rhs ^ -ONE)
     }
 }
 
 impl ops::Neg for Scalar {
     type Output = Self;
     fn neg(self) -> Self {
-        Scalar::from(-ONE) * self
+        Scalar::Rational(-ONE) * self
     }
 }
 
