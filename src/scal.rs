@@ -1,4 +1,5 @@
 use std::cmp;
+use std::cmp::Ordering;
 use std::fmt;
 use std::ops;
 use std::collections::VecDeque;
@@ -271,6 +272,7 @@ impl ops::Mul for Scalar {
         const EXPECT_ERR: &str = "term should not be empty";
 
         match (self, rhs) {
+            (Scalar::Rational(lhs), Scalar::Rational(rhs)) => Scalar::Rational(lhs * rhs),
             (Scalar::Product(lhs), Scalar::Product(rhs)) => {
                 let mut lhs: VecDeque<Exponential> = VecDeque::from(lhs);
                 let mut rhs: VecDeque<Exponential> = VecDeque::from(rhs);
@@ -341,8 +343,83 @@ impl ops::Neg for Scalar {
     }
 }
 
+#[derive(Copy, Clone, PartialEq)]
+struct ExprCost {
+    c: usize,
+    v: usize
+}
+
+impl ExprCost {
+    fn zero() -> ExprCost {
+        ExprCost { c: 0, v: 0}
+    }
+
+    fn new(ops_count: usize, is_constant: bool) -> ExprCost {
+        if is_constant { ExprCost { c: ops_count, v: 0 }}
+        else { ExprCost { v: ops_count, c: 0 } }
+    }
+}
+
+impl ops::Add for ExprCost {
+    type Output = Self;
+    fn add(self, rhs: Self) -> Self::Output {
+        ExprCost { c: self.c + rhs.c, v: self.v + rhs.v}
+    }
+}
+
+impl PartialOrd for ExprCost {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        let v_order = self.v.cmp(&other.v);
+        if v_order == Ordering::Equal { Some(self.c.cmp(&other.c)) }
+        else { Some(v_order) }
+    }
+}
+
 impl Scalar {
-    fn simplified(&self) {
+    fn is_constant(&self) -> bool {
+        match self {
+            Scalar::Rational(_) => false,
+            Scalar::Variable(_) => true,
+            Scalar::Sum(terms) => {
+                for term in terms {
+                    if !term.is_constant() {
+                        return false;
+                    }
+                }
+                true
+            }
+            Scalar::Product(factors) => {
+                for factor in factors {
+                    if !factor.b.is_constant() {
+                        return false;
+                    }
+                }
+                true
+            }
+        }
+    }
+
+    fn cost(&self) -> ExprCost {
+        match self {
+            Scalar::Sum(terms) => {
+                let mut total_cost: ExprCost = ExprCost::zero();
+                for term in terms {
+                    total_cost = total_cost + term.cost();
+                }
+                total_cost + ExprCost::new(terms.len() - 1, self.is_constant())
+            }
+            Scalar::Product(factors) => {
+                let mut total_cost: ExprCost = ExprCost::zero();
+                for factor in factors {
+                    total_cost = total_cost + factor.b.cost();
+                }
+                total_cost + ExprCost::new(factors.len() - 1, self.is_constant())
+            }
+            _ => ExprCost { c: 0, v: 0}
+        }
+    }
+
+    pub fn simplified(&self) {
         todo!()
     }
 }
