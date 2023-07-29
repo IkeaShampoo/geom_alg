@@ -1,5 +1,4 @@
 use std::cmp;
-use std::cmp::Ordering;
 use std::fmt;
 use std::ops;
 use std::collections::VecDeque;
@@ -19,7 +18,7 @@ fn gcd(a: u32, b: u32) -> u32 {
 fn iterative_mul<T: ops::Mul<Output = T> + Copy>(identity: T, base: T, exp: u32) -> T {
     let mut product = identity;
     let mut base_to_i = identity;
-    for i in 0..32 {
+    for i in 0..u32::BITS {
         if ((exp >> i) & 1) == 1 {
             product = product * base_to_i;
         }
@@ -151,12 +150,6 @@ impl PartialOrd for Exponential {
         let b_order = lb.partial_cmp(rb);
         if b_order == Some(cmp::Ordering::Equal) {le.partial_cmp(re)}
         else {b_order}
-
-        /* Now-irrelevant comments from previous version
-            // All rational-based exponentials will accumulate in one consecutive cluster
-            // These are ordered first by exponent, then by base
-            // All other exponentials are ordered by base, then by exponent
-         */
     }
 }
 
@@ -179,6 +172,12 @@ impl From<String> for Scalar {
 impl From<Rational> for Scalar {
     fn from(fraction: Rational) -> Self {
         Scalar::Rational(fraction)
+    }
+}
+
+impl From<Exponential> for Scalar {
+    fn from(exponential: Exponential) -> Self {
+        Scalar::Product(vec![exponential])
     }
 }
 
@@ -248,6 +247,8 @@ impl ops::Add for Scalar {
                 Scalar::Sum(new_terms)
             }
             (lhs, rhs) => {
+                if lhs == ZERO { return rhs; }
+                if rhs == ZERO { return lhs; }
                 let (old_terms, new_term): (Vec<Scalar>, Scalar) =
                     if let Scalar::Sum(lhs) = lhs { (lhs, rhs) }
                     else if let Scalar::Sum(rhs) = rhs { (rhs, lhs) }
@@ -368,14 +369,71 @@ impl ops::Add for ExprCost {
 }
 
 impl PartialOrd for ExprCost {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
         let v_order = self.v.cmp(&other.v);
-        if v_order == Ordering::Equal { Some(self.c.cmp(&other.c)) }
+        if v_order == cmp::Ordering::Equal { Some(self.c.cmp(&other.c)) }
         else { Some(v_order) }
     }
 }
 
+/* to delete
+
+fn round_up_2s(n: usize) -> usize {
+    for i in (0..usize::BITS).rev() {
+        let mask: usize = 1 << i;
+        if n & mask != 0 {
+            return if n & !mask == 0 { 1 << i } else { 1 << (i + 1) }
+        }
+    }
+    0
+}
+
+ */
+
+fn merge_scalars(arguments: Vec<Scalar>, merge: fn(Scalar, Scalar) -> Scalar, identity: &Scalar)
+                 -> Scalar {
+    if arguments.len() == 0 {
+        identity.clone()
+    }
+    else {
+        let left_len = arguments.len() >> 1;
+        let mut left: Vec<Scalar> = Vec::with_capacity(left_len);
+        let mut right: Vec<Scalar> = Vec::with_capacity(arguments.len() - left_len);
+        for arg in arguments {
+            if left.len() < left_len { &mut left } else { &mut right }
+                .push(arg);
+        }
+        merge(merge_scalars(left, merge, identity), merge_scalars(right, merge, identity))
+    }
+}
+
 impl Scalar {
+    fn replace(self, to_replace: &Scalar, replace_with: &Scalar) -> Scalar {
+        match self {
+            Scalar::Sum(terms) => {
+                let mut new_terms: Vec<Scalar> = Vec::with_capacity(terms.len());
+                for term in terms {
+                    new_terms.push(term.replace(to_replace, replace_with));
+                }
+                merge_scalars(new_terms, |x, y| x + y, &Scalar::from(ZERO))
+            }
+            Scalar::Product(factors) => {
+                let mut new_factors: Vec<Scalar> = Vec::with_capacity(factors.len());
+                for Exponential { b: factor_base, e: factor_exp } in factors {
+                    new_factors.push(Scalar::from(Exponential {
+                        b: factor_base.replace(to_replace, replace_with),
+                        e: factor_exp
+                    }));
+                }
+                merge_scalars(new_factors, |x, y| x * y, &Scalar::from(ONE))
+            }
+            x => {
+                if x == *to_replace { replace_with.clone() }
+                else { x }
+            }
+        }
+    }
+
     fn is_constant(&self) -> bool {
         match self {
             Scalar::Rational(_) => false,
