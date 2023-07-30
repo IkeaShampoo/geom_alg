@@ -2,6 +2,7 @@ use std::cmp;
 use std::fmt;
 use std::ops;
 use std::collections::VecDeque;
+use std::collections::BTreeSet;
 
 fn gcd(a: u32, b: u32) -> u32 {
     let mut x = a;
@@ -177,7 +178,8 @@ impl From<Rational> for Scalar {
 
 impl From<Exponential> for Scalar {
     fn from(exponential: Exponential) -> Self {
-        Scalar::Product(vec![exponential])
+        if exponential.e == ONE { exponential.b }
+        else { Scalar::Product(vec![exponential]) }
     }
 }
 
@@ -436,8 +438,8 @@ impl Scalar {
 
     fn is_constant(&self) -> bool {
         match self {
-            Scalar::Rational(_) => false,
-            Scalar::Variable(_) => true,
+            Scalar::Rational(_) => true,
+            Scalar::Variable(x) => *x == x.to_uppercase(),
             Scalar::Sum(terms) => {
                 for term in terms {
                     if !term.is_constant() {
@@ -477,7 +479,51 @@ impl Scalar {
         }
     }
 
-    pub fn simplified(&self) {
-        todo!()
+    pub fn simplified(&self) -> Scalar {
+        let swap = Scalar::Variable(String::from(char::from_u32(0x1F431).unwrap()));
+
+        const RULES: [fn(&Scalar) -> Option<Scalar>; 1] = [
+            { |x| None }
+        ];
+
+        struct Simplifier {
+            simplest: (Scalar, ExprCost),
+            territory: BTreeSet<Scalar>,
+            queue: Vec<Scalar>
+        }
+
+        impl Simplifier {
+            fn discover(&mut self, expr: Scalar) {
+                if !self.territory.contains(&expr) {
+                    let expr_cost = expr.cost();
+                    if expr_cost < self.simplest.1 {
+                        self.simplest = (expr.clone(), expr_cost)
+                    }
+                    self.territory.insert(expr.clone());
+                    self.queue.push(expr);
+                }
+            }
+
+            fn derive (&mut self, expr: Scalar, expr_placeholder: &Scalar, full_template: Scalar) {
+                for rule in &RULES {
+                    if let Some(expr_trans) = (*rule)(&expr) {
+                        self.discover(full_template.clone().replace(expr_placeholder, &expr_trans));
+                    }
+                }
+
+            }
+        }
+
+        let mut simplifier = Simplifier {
+            simplest: (self.clone(), self.cost()),
+            territory: BTreeSet::new(),
+            queue: Vec::new()
+        };
+
+        simplifier.discover(self.clone());
+        while let Some(next_expr) = simplifier.queue.pop() {
+            simplifier.derive(next_expr, &swap, swap.clone());
+        }
+        simplifier.simplest.0
     }
 }
