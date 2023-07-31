@@ -1,8 +1,7 @@
 use std::cmp;
 use std::fmt;
 use std::ops;
-use std::collections::VecDeque;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 fn gcd(a: u32, b: u32) -> u32 {
     let mut x = a;
@@ -380,6 +379,49 @@ impl PartialOrd for ExprCost {
     }
 }
 
+const RULES: [fn(&Scalar) -> Option<Scalar>; 1] = [
+    { |_| None }
+];
+
+struct Simplifier {
+    simplest: (Scalar, ExprCost),
+    territory: BTreeSet<Scalar>,
+    queue: Vec<Scalar>
+}
+
+impl Simplifier {
+    fn discover(&mut self, expr: Scalar) {
+        if !self.territory.contains(&expr) {
+            let expr_cost = expr.cost();
+            if expr_cost < self.simplest.1 {
+                self.simplest = (expr.clone(), expr_cost)
+            }
+            self.territory.insert(expr.clone());
+            self.queue.push(expr);
+        }
+    }
+
+    fn derive (&mut self, expr: Scalar, expr_placeholder: &Scalar, full_template: Scalar) {
+        for rule in &RULES {
+            if let Some(expr_trans) = (*rule)(&expr) {
+                self.discover(full_template.clone().replace(expr_placeholder, &expr_trans));
+            }
+        }
+
+    }
+}
+
+struct MatchRule {
+    match_vars: BTreeSet<String>,
+    match_in: Scalar,
+    match_out: Scalar
+}
+
+enum Rule {
+    Match(MatchRule),
+    Anon(fn(Scalar) -> Option<Scalar>)
+}
+
 
 
 fn merge_scalars_rec(arguments: &mut Vec<Scalar>, size: usize,
@@ -404,6 +446,14 @@ fn merge_scalars(arguments: Vec<Scalar>, merge: fn(Scalar, Scalar) -> Scalar, id
     merge_scalars_rec(&mut {arguments}, init_size, merge, identity)
 }
 
+fn add_all(terms: Vec<Scalar>) -> Scalar {
+    merge_scalars(terms, |x, y| x + y, &Scalar::from(ZERO))
+}
+
+fn mul_all(factors: Vec<Scalar>) -> Scalar {
+    merge_scalars(factors, |x, y| x * y, &Scalar::from(ONE))
+}
+
 impl Scalar {
     fn replace(self, to_replace: &Scalar, replace_with: &Scalar) -> Scalar {
         match self {
@@ -412,7 +462,7 @@ impl Scalar {
                 for term in terms {
                     new_terms.push(term.replace(to_replace, replace_with));
                 }
-                merge_scalars(new_terms, |x, y| x + y, &Scalar::from(ZERO))
+                add_all(new_terms)
             }
             Scalar::Product(factors) => {
                 let mut new_factors: Vec<Scalar> = Vec::with_capacity(factors.len());
@@ -422,13 +472,40 @@ impl Scalar {
                         e: factor_exp
                     }));
                 }
-                merge_scalars(new_factors, |x, y| x * y, &Scalar::from(ONE))
+                mul_all(new_factors)
             }
             x => {
                 if x == *to_replace { replace_with.clone() }
                 else { x }
             }
         }
+    }
+
+    fn replace_all(self, replacements: &BTreeMap<&Scalar, &Scalar>) -> Scalar {
+        match replacements.get(&self) {
+            Some(x) => (*x).clone(),
+            None => match self {
+                Scalar::Sum(terms) => {
+                    let mut new_terms: Vec<Scalar> = Vec::with_capacity(terms.len());
+                    for term in terms {
+                        new_terms.push(term.replace_all(replacements));
+                    }
+                    add_all(new_terms)
+                }
+                Scalar::Product(factors) => {
+                    let mut new_factors: Vec<Scalar> = Vec::with_capacity(factors.len());
+                    for Exponential { b: factor_base, e: factor_exp } in factors {
+                        new_factors.push(Scalar::from(Exponential {
+                            b: factor_base.replace_all(replacements),
+                            e: factor_exp
+                        }));
+                    }
+                    mul_all(new_factors)
+                }
+                x => x
+            }
+        }
+
     }
 
     fn is_constant(&self) -> bool {
@@ -474,40 +551,16 @@ impl Scalar {
         }
     }
 
+    /* SHOULD RULES BE SIMPLE PATTERN-MATCHERS, OR BLACK-BOX FUNCTIONS?
+
+    Types of rules:
+        Distribution/Factorization
+        Exponent stuff
+
+     */
     pub fn simplified(&self) -> Scalar {
+        let swap_prefix = Scalar::Variable(String::from(char::from_u32(0xD9E).unwrap()));
         let swap = Scalar::Variable(String::from(char::from_u32(0x1F431).unwrap()));
-
-        const RULES: [fn(&Scalar) -> Option<Scalar>; 1] = [
-            { |_| None }
-        ];
-
-        struct Simplifier {
-            simplest: (Scalar, ExprCost),
-            territory: BTreeSet<Scalar>,
-            queue: Vec<Scalar>
-        }
-
-        impl Simplifier {
-            fn discover(&mut self, expr: Scalar) {
-                if !self.territory.contains(&expr) {
-                    let expr_cost = expr.cost();
-                    if expr_cost < self.simplest.1 {
-                        self.simplest = (expr.clone(), expr_cost)
-                    }
-                    self.territory.insert(expr.clone());
-                    self.queue.push(expr);
-                }
-            }
-
-            fn derive (&mut self, expr: Scalar, expr_placeholder: &Scalar, full_template: Scalar) {
-                for rule in &RULES {
-                    if let Some(expr_trans) = (*rule)(&expr) {
-                        self.discover(full_template.clone().replace(expr_placeholder, &expr_trans));
-                    }
-                }
-
-            }
-        }
 
         let mut simplifier = Simplifier {
             simplest: (self.clone(), self.cost()),
