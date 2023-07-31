@@ -346,6 +346,8 @@ impl ops::Neg for Scalar {
     }
 }
 
+
+
 #[derive(Copy, Clone, PartialEq)]
 struct ExprCost {
     c: usize,
@@ -378,35 +380,28 @@ impl PartialOrd for ExprCost {
     }
 }
 
-/* to delete
 
-fn round_up_2s(n: usize) -> usize {
-    for i in (0..usize::BITS).rev() {
-        let mask: usize = 1 << i;
-        if n & mask != 0 {
-            return if n & !mask == 0 { 1 << i } else { 1 << (i + 1) }
+
+fn merge_scalars_rec(arguments: &mut Vec<Scalar>, size: usize,
+                     merge: fn(Scalar, Scalar) -> Scalar, identity: &Scalar) -> Scalar {
+    if size > 2 {
+        let left_size = size / 2;
+        merge(merge_scalars_rec(arguments, left_size, merge, identity),
+              merge_scalars_rec(arguments, size - left_size, merge, identity))
+    }
+    else {
+        match (arguments.pop(), arguments.pop()) {
+            (Some(a), Some(b)) => merge(a, b),
+            (Some(x), None) | (None, Some(x)) => x,
+            (None, None) => identity.clone()
         }
     }
-    0
 }
-
- */
 
 fn merge_scalars(arguments: Vec<Scalar>, merge: fn(Scalar, Scalar) -> Scalar, identity: &Scalar)
                  -> Scalar {
-    if arguments.len() == 0 {
-        identity.clone()
-    }
-    else {
-        let left_len = arguments.len() >> 1;
-        let mut left: Vec<Scalar> = Vec::with_capacity(left_len);
-        let mut right: Vec<Scalar> = Vec::with_capacity(arguments.len() - left_len);
-        for arg in arguments {
-            if left.len() < left_len { &mut left } else { &mut right }
-                .push(arg);
-        }
-        merge(merge_scalars(left, merge, identity), merge_scalars(right, merge, identity))
-    }
+    let init_size = arguments.len();
+    merge_scalars_rec(&mut {arguments}, init_size, merge, identity)
 }
 
 impl Scalar {
@@ -483,7 +478,7 @@ impl Scalar {
         let swap = Scalar::Variable(String::from(char::from_u32(0x1F431).unwrap()));
 
         const RULES: [fn(&Scalar) -> Option<Scalar>; 1] = [
-            { |x| None }
+            { |_| None }
         ];
 
         struct Simplifier {
