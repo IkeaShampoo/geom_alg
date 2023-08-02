@@ -407,7 +407,6 @@ impl Simplifier {
                 self.discover(full_template.clone().replace(expr_placeholder, &expr_trans));
             }
         }
-
     }
 }
 
@@ -417,10 +416,22 @@ struct MatchRule {
     match_out: Scalar
 }
 
+struct MatchNode {
+    rule: MatchRule
+
+}
+
 enum Rule {
     Match(MatchRule),
     Anon(fn(Scalar) -> Option<Scalar>)
 }
+
+fn do_the_thing(expr: Scalar, expr_placeholder: &Scalar, parent_template: Scalar,
+                match_in: &Scalar, matches: BTreeMap<String, Scalar>, simplifier: Simplifier) {
+
+}
+
+
 
 
 
@@ -481,31 +492,31 @@ impl Scalar {
         }
     }
 
-    fn replace_all(self, replacements: &BTreeMap<&Scalar, &Scalar>) -> Scalar {
-        match replacements.get(&self) {
-            Some(x) => (*x).clone(),
-            None => match self {
-                Scalar::Sum(terms) => {
-                    let mut new_terms: Vec<Scalar> = Vec::with_capacity(terms.len());
-                    for term in terms {
-                        new_terms.push(term.replace_all(replacements));
-                    }
-                    add_all(new_terms)
+    fn replace_all(self, replacements: &BTreeMap<String, &Scalar>) -> Scalar {
+        match self {
+            Scalar::Sum(terms) => {
+                let mut new_terms: Vec<Scalar> = Vec::with_capacity(terms.len());
+                for term in terms {
+                    new_terms.push(term.replace_all(replacements));
                 }
-                Scalar::Product(factors) => {
-                    let mut new_factors: Vec<Scalar> = Vec::with_capacity(factors.len());
-                    for Exponential { b: factor_base, e: factor_exp } in factors {
-                        new_factors.push(Scalar::from(Exponential {
-                            b: factor_base.replace_all(replacements),
-                            e: factor_exp
-                        }));
-                    }
-                    mul_all(new_factors)
-                }
-                x => x
+                add_all(new_terms)
             }
+            Scalar::Product(factors) => {
+                let mut new_factors: Vec<Scalar> = Vec::with_capacity(factors.len());
+                for Exponential { b: factor_base, e: factor_exp } in factors {
+                    new_factors.push(Scalar::from(Exponential {
+                        b: factor_base.replace_all(replacements),
+                        e: factor_exp
+                    }));
+                }
+                mul_all(new_factors)
+            }
+            Scalar::Variable(x) => match replacements.get(&x) {
+                Some(replacement) => (*replacement).clone(),
+                None => Scalar::Variable(x)
+            }
+            x => x
         }
-
     }
 
     fn is_constant(&self) -> bool {
