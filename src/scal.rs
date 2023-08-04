@@ -178,6 +178,7 @@ impl From<Rational> for Scalar {
 impl From<Exponential> for Scalar {
     fn from(exponential: Exponential) -> Self {
         if exponential.e == ONE { exponential.b }
+        else if exponential.e == ZERO { Scalar::from(ONE) }
         else { Scalar::Product(vec![exponential]) }
     }
 }
@@ -315,18 +316,22 @@ impl ops::Mul for Scalar {
 impl ops::BitXor<Rational> for Scalar {
     type Output = Self;
     fn bitxor(self, exp: Rational) -> Self::Output {
-        match self {
-            Scalar::Rational(x) => {
-                if exp.d == 1 { Scalar::Rational(x ^ exp.n) }
-                else { Scalar::Product(vec![Exponential{b: Scalar::Rational(x), e: exp}]) }
-            }
-            Scalar::Product(mut factors) => {
-                for factor in &mut factors {
-                    (*factor).e = (*factor).e * exp;
+        if exp == ZERO { Scalar::from(ONE) }
+        else if exp == ONE { self }
+        else {
+            match self {
+                Scalar::Rational(x) => {
+                    if exp.d == 1 { Scalar::Rational(x ^ exp.n) }
+                    else { Scalar::Product(vec![Exponential{b: Scalar::Rational(x), e: exp}]) }
                 }
-                Scalar::Product(factors)
+                Scalar::Product(mut factors) => {
+                    for factor in &mut factors {
+                        (*factor).e = (*factor).e * exp;
+                    }
+                    Scalar::Product(factors)
+                }
+                x => Scalar::Product(vec![Exponential{b: x, e: exp}])
             }
-            x => Scalar::Product(vec![Exponential{b: x, e: exp}])
         }
     }
 }
@@ -379,8 +384,27 @@ impl PartialOrd for ExprCost {
     }
 }
 
-const RULES: [fn(&Scalar) -> Option<Scalar>; 1] = [
-    { |_| None }
+const RULES: [fn(&Scalar) -> Vec<Scalar>; 1] = [
+    {
+        |x| match x {                       // Factorization
+            Scalar::Sum(terms) => {
+                let factors: BTreeMap<Scalar, Vec<Rational>> = BTreeMap::new();
+
+                todo!()
+            }
+            _ => Vec::new()
+        }
+            /* Options:
+                    For each pair of terms
+                        For each shared factor
+                            Factor it out
+
+                !!  For each possible factor
+                !!      For each pair of terms containing the factor
+                !!          Factor it out
+             */
+
+    }
 ];
 
 struct Simplifier {
@@ -403,34 +427,12 @@ impl Simplifier {
 
     fn derive (&mut self, expr: Scalar, expr_placeholder: &Scalar, full_template: Scalar) {
         for rule in &RULES {
-            if let Some(expr_trans) = (*rule)(&expr) {
-                self.discover(full_template.clone().replace(expr_placeholder, &expr_trans));
+            for trans_expr in (*rule)(&expr) {
+                self.discover(full_template.clone().replace(expr_placeholder, &trans_expr));
             }
         }
     }
 }
-
-struct MatchRule {
-    match_vars: BTreeSet<String>,
-    match_in: Scalar,
-    match_out: Scalar
-}
-
-struct MatchNode {
-    rule: MatchRule
-
-}
-
-enum Rule {
-    Match(MatchRule),
-    Anon(fn(Scalar) -> Option<Scalar>)
-}
-
-fn do_the_thing(expr: Scalar, expr_placeholder: &Scalar, parent_template: Scalar,
-                match_in: &Scalar, matches: BTreeMap<String, Scalar>, simplifier: Simplifier) {
-
-}
-
 
 
 
@@ -457,14 +459,6 @@ fn merge_scalars(arguments: Vec<Scalar>, merge: fn(Scalar, Scalar) -> Scalar, id
     merge_scalars_rec(&mut {arguments}, init_size, merge, identity)
 }
 
-fn add_all(terms: Vec<Scalar>) -> Scalar {
-    merge_scalars(terms, |x, y| x + y, &Scalar::from(ZERO))
-}
-
-fn mul_all(factors: Vec<Scalar>) -> Scalar {
-    merge_scalars(factors, |x, y| x * y, &Scalar::from(ONE))
-}
-
 impl Scalar {
     fn replace(self, to_replace: &Scalar, replace_with: &Scalar) -> Scalar {
         match self {
@@ -473,7 +467,7 @@ impl Scalar {
                 for term in terms {
                     new_terms.push(term.replace(to_replace, replace_with));
                 }
-                add_all(new_terms)
+                merge_scalars(new_terms, |x, y| x + y, &Scalar::from(ZERO))
             }
             Scalar::Product(factors) => {
                 let mut new_factors: Vec<Scalar> = Vec::with_capacity(factors.len());
@@ -483,7 +477,7 @@ impl Scalar {
                         e: factor_exp
                     }));
                 }
-                mul_all(new_factors)
+                merge_scalars(new_factors, |x, y| x * y, &Scalar::from(ONE))
             }
             x => {
                 if x == *to_replace { replace_with.clone() }
@@ -499,7 +493,7 @@ impl Scalar {
                 for term in terms {
                     new_terms.push(term.replace_all(replacements));
                 }
-                add_all(new_terms)
+                merge_scalars(new_terms, |x, y| x + y, &Scalar::from(ZERO))
             }
             Scalar::Product(factors) => {
                 let mut new_factors: Vec<Scalar> = Vec::with_capacity(factors.len());
@@ -509,7 +503,7 @@ impl Scalar {
                         e: factor_exp
                     }));
                 }
-                mul_all(new_factors)
+                merge_scalars(new_factors, |x, y| x * y, &Scalar::from(ONE))
             }
             Scalar::Variable(x) => match replacements.get(&x) {
                 Some(replacement) => (*replacement).clone(),
