@@ -29,8 +29,8 @@ fn iterative_mul<T: ops::Mul<Output = T> + Copy>(identity: T, base: T, exp: u32)
 
 #[derive(Copy, Clone, Eq, Ord, Debug)]
 pub struct Rational { n: i32, d: u32 }
-const ZERO: Rational = Rational {n: 0, d: 1};
-const ONE: Rational = Rational {n: 1, d: 1};
+const ZERO: Rational = Rational { n: 0, d: 1 };
+const ONE: Rational = Rational { n: 1, d: 1 };
 
 impl Rational {
     pub fn new(num: i32, den: i32) -> Rational {
@@ -38,13 +38,27 @@ impl Rational {
             if den < 0 {(num * -1, (den * -1) as u32)}
             else { (num, den as u32) };
         let gcd_nd: u32 = gcd(n.unsigned_abs(), d);
-        return Rational {n: n / (gcd_nd as i32), d: d / gcd_nd};
+        return Rational { n: n / (gcd_nd as i32), d: d / gcd_nd };
+    }
+
+    pub fn min(a: Rational, b: Rational) -> Rational {
+        if a < b { a }
+        else { b }
+    }
+
+    pub fn max(a: Rational, b: Rational) -> Rational {
+        if a > b { a }
+        else { b }
+    }
+
+    pub fn abs(self) -> Rational {
+        Rational { n: self.n.abs(), d: self.d }
     }
 }
 
 impl From<i32> for Rational {
     fn from(integer: i32) -> Self {
-        Rational {n: integer, d: 1 }
+        Rational { n: integer, d: 1 }
     }
 }
 
@@ -127,7 +141,7 @@ pub struct Exponential {
 
 impl From<Scalar> for Exponential {
     fn from(scalar: Scalar) -> Exponential {
-        Exponential{b: scalar, e: ONE}
+        Exponential { b: scalar, e: ONE }
     }
 }
 
@@ -146,10 +160,11 @@ impl PartialEq<Self> for Exponential {
 
 impl PartialOrd for Exponential {
     fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
-        let (Exponential{b: lb, e: le}, Exponential{b: rb, e: re}) = (self, other);
+        let (Exponential { b: lb, e: le },
+             Exponential { b: rb, e: re }) = (self, other);
         let b_order = lb.partial_cmp(rb);
-        if b_order == Some(cmp::Ordering::Equal) {le.partial_cmp(re)}
-        else {b_order}
+        if b_order == Some(cmp::Ordering::Equal) { le.partial_cmp(re) }
+        else { b_order }
     }
 }
 
@@ -236,8 +251,8 @@ impl ops::Add for Scalar {
                         }
                         (lhs_next, rhs_next) => {
                             new_terms.push(
-                                if *lhs_next < *rhs_next {lhs.pop_front()}
-                                else {rhs.pop_front()}
+                                if *lhs_next < *rhs_next { lhs.pop_front() }
+                                else { rhs.pop_front() }
                                     .expect("term should not be empty")
                             );
                         }
@@ -254,7 +269,7 @@ impl ops::Add for Scalar {
                 let (old_terms, new_term): (Vec<Scalar>, Scalar) =
                     if let Scalar::Sum(lhs) = lhs { (lhs, rhs) }
                     else if let Scalar::Sum(rhs) = rhs { (rhs, lhs) }
-                    else { (vec!{lhs}, rhs) };
+                    else { (vec![lhs], rhs) };
                 Scalar::Sum(old_terms) + Scalar::Sum(vec![new_term])
             }
         }
@@ -288,7 +303,7 @@ impl ops::Mul for Scalar {
                             let base = rhs.pop_front().expect(EXPECT_ERR).b;
                             lhs.pop_front();
                             if exp != ZERO {
-                                new_factors.push(Exponential {b: base, e: exp });
+                                new_factors.push(Exponential { b: base, e: exp });
                             }
                         }
                         cmp::Ordering::Less => new_factors.push(lhs.pop_front().expect(EXPECT_ERR)),
@@ -322,7 +337,7 @@ impl ops::BitXor<Rational> for Scalar {
             match self {
                 Scalar::Rational(x) => {
                     if exp.d == 1 { Scalar::Rational(x ^ exp.n) }
-                    else { Scalar::Product(vec![Exponential{b: Scalar::Rational(x), e: exp}]) }
+                    else { Scalar::Product(vec![Exponential { b: Scalar::Rational(x), e: exp }]) }
                 }
                 Scalar::Product(mut factors) => {
                     for factor in &mut factors {
@@ -330,7 +345,7 @@ impl ops::BitXor<Rational> for Scalar {
                     }
                     Scalar::Product(factors)
                 }
-                x => Scalar::Product(vec![Exponential{b: x, e: exp}])
+                x => Scalar::Product(vec![Exponential { b: x, e: exp }])
             }
         }
     }
@@ -388,9 +403,36 @@ const RULES: [fn(&Scalar) -> Vec<Scalar>; 1] = [
     {
         |x| match x {                       // Factorization
             Scalar::Sum(terms) => {
-                let factors: BTreeMap<Scalar, Vec<Rational>> = BTreeMap::new();
+                type FactorIndexer = BTreeMap<Scalar, Vec<(usize, Rational)>>;
+                fn index_factor(factors_indices: &mut FactorIndexer, term_index: usize,
+                                factor_base: &Scalar, factor_exp: Rational) {
+                    match factors_indices.get_mut(factor_base) {
+                        Some(factor_indices) => factor_indices.push((term_index, factor_exp)),
+                        None => {
+                            factors_indices.insert(factor_base.clone(), vec![(term_index,
+                                                                              factor_exp)]);
+                        }
+                    }
+                }
 
-                todo!()
+                let mut factors_indices: FactorIndexer = BTreeMap::new();
+                let mut term_index: usize = 0;
+                for term in terms {
+                    match term {
+                        Scalar::Product(factors) => {
+                            for factor in factors {
+                                index_factor(&mut factors_indices, term_index, &factor.b, factor.e);
+                            }
+                        }
+                        x => index_factor(&mut factors_indices, term_index, &x, ONE)
+                    }
+                    term_index += 1;
+                }
+
+                let factorizations: Vec<Scalar> = Vec::new();
+
+
+                factorizations
             }
             _ => Vec::new()
         }
