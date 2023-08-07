@@ -28,4 +28,14 @@ mod tests {
         assert_eq!(ax.to_string(), xa.to_string());
         assert_eq!(ax.to_string(), String::from("(a * 5)"));
     }
+
+    #[test]
+    fn ez_factorization_test() {
+        let a = scal::Scalar::from("a");
+        let b = scal::Scalar::from("b");
+        let c = scal::Scalar::from("c");
+        let ab_ac = a.clone() * b.clone() + a.clone() * c.clone();
+        let a_bc = a.clone() * (b.clone() + c.clone());
+        assert_eq!(ab_ac.simplified().to_string(), a_bc.to_string());
+    }
 }

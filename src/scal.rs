@@ -184,6 +184,12 @@ impl From<String> for Scalar {
     }
 }
 
+impl From<&str> for Scalar {
+    fn from(name: &str) -> Self {
+        Scalar::Variable(String::from(name))
+    }
+}
+
 impl From<Rational> for Scalar {
     fn from(fraction: Rational) -> Self {
         Scalar::Rational(fraction)
@@ -429,23 +435,64 @@ const RULES: [fn(&Scalar) -> Vec<Scalar>; 1] = [
                     term_index += 1;
                 }
 
-                let factorizations: Vec<Scalar> = Vec::new();
+                let mut factorizations: Vec<Scalar> = Vec::new();
+                for (factor, indices) in factors_indices {
+                    for i in 0..(indices.len() - 1) {
 
+                        // ASSUMES THAT term CONTAINS factor
+                        fn remove_factor(term: Scalar, factor: &Scalar, exp: Rational) -> Scalar {
+                            match term {
+                                Scalar::Product(mut factors) => {
+                                    for j in 0..factors.len() {
+                                        if factors[j].b == *factor {
+                                            if factors[j].e == exp {
+                                                factors.remove(j);
+                                            }
+                                            else {
+                                                factors[j].e = factors[j].e - exp;
+                                            }
+                                            break;
+                                        }
+                                    }
+                                    match factors.len() {
+                                        0 => Scalar::Rational(ONE),
+                                        1 => match factors.pop() {
+                                            Some(one_factor) => one_factor.b ^ one_factor.e,
+                                            None => Scalar::Rational(ONE)
+                                        }
+                                        _ => Scalar::Product(factors)
+                                    }
+                                }
+                                _ => Scalar::Rational(ONE)
+                            }
+                        }
+
+                        let (index1, exp1) = indices[i];
+                        for &(index2, exp2) in &indices[(i + 1)..] {
+                            if (exp1.n < 0) == (exp2.n < 0) {
+                                let exp: Rational = if exp1.abs() < exp2.abs() { exp1 }
+                                                    else { exp2 };
+                                let mut new_terms: Vec<Scalar> = terms.clone();
+                                let init_last_index = new_terms.len() - 1;
+                                let term1 = new_terms.swap_remove(index1);
+                                let term2 = new_terms.swap_remove(
+                                    if index2 == init_last_index { index1 }
+                                    else { index2 }
+                                );
+                                new_terms.push((factor.clone() ^ exp) *
+                                               (remove_factor(term1, &factor, exp) +
+                                                remove_factor(term2, &factor, exp)));
+
+                                factorizations.push(add_all(new_terms));
+                            }
+                        }
+                    }
+                }
 
                 factorizations
             }
             _ => Vec::new()
         }
-            /* Options:
-                    For each pair of terms
-                        For each shared factor
-                            Factor it out
-
-                !!  For each possible factor
-                !!      For each pair of terms containing the factor
-                !!          Factor it out
-             */
-
     }
 ];
 
@@ -457,6 +504,8 @@ struct Simplifier {
 
 impl Simplifier {
     fn discover(&mut self, expr: Scalar) {
+        //println!("{}", expr);
+
         if !self.territory.contains(&expr) {
             let expr_cost = expr.cost();
             if expr_cost < self.simplest.1 {
@@ -501,6 +550,14 @@ fn merge_scalars(arguments: Vec<Scalar>, merge: fn(Scalar, Scalar) -> Scalar, id
     merge_scalars_rec(&mut {arguments}, init_size, merge, identity)
 }
 
+fn add_all(terms: Vec<Scalar>) -> Scalar {
+    merge_scalars(terms, |x, y| x + y, &Scalar::from(ZERO))
+}
+
+fn mul_all(factors: Vec<Scalar>) -> Scalar {
+    merge_scalars(factors, |x, y| x * y, &Scalar::from(ONE))
+}
+
 impl Scalar {
     fn replace(self, to_replace: &Scalar, replace_with: &Scalar) -> Scalar {
         match self {
@@ -509,7 +566,7 @@ impl Scalar {
                 for term in terms {
                     new_terms.push(term.replace(to_replace, replace_with));
                 }
-                merge_scalars(new_terms, |x, y| x + y, &Scalar::from(ZERO))
+                add_all(new_terms)
             }
             Scalar::Product(factors) => {
                 let mut new_factors: Vec<Scalar> = Vec::with_capacity(factors.len());
@@ -519,7 +576,7 @@ impl Scalar {
                         e: factor_exp
                     }));
                 }
-                merge_scalars(new_factors, |x, y| x * y, &Scalar::from(ONE))
+                mul_all(new_factors)
             }
             x => {
                 if x == *to_replace { replace_with.clone() }
@@ -606,8 +663,7 @@ impl Scalar {
 
      */
     pub fn simplified(&self) -> Scalar {
-        let swap_prefix = Scalar::Variable(String::from(char::from_u32(0xD9E).unwrap()));
-        let swap = Scalar::Variable(String::from(char::from_u32(0x1F431).unwrap()));
+        let swap = Scalar::Variable(String::from(char::from_u32(0xD9E).unwrap()));
 
         let mut simplifier = Simplifier {
             simplest: (self.clone(), self.cost()),
