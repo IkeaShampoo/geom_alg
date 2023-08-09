@@ -34,8 +34,9 @@ mod tests {
         let a = scal::Scalar::from("a");
         let b = scal::Scalar::from("b");
         let c = scal::Scalar::from("c");
-        let ab_ac = a.clone() * b.clone() + a.clone() * c.clone();
-        let a_bc = a.clone() * (b.clone() + c.clone());
-        assert_eq!(ab_ac.simplified().to_string(), a_bc.to_string());
+        let d = scal::Scalar::from("d");
+        let ab_ac_ad = a.clone() * b.clone() + a.clone() * c.clone() + a.clone() * d.clone();
+        let a_bcd = a.clone() * (b.clone() + c.clone() + d.clone());
+        assert_eq!(ab_ac_ad.simplified().to_string(), a_bcd.to_string());
     }
 }
