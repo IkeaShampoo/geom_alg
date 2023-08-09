@@ -27,7 +27,23 @@ fn iterative_mul<T: ops::Mul<Output = T> + Copy>(identity: T, base: T, exp: u32)
     product
 }
 
-#[derive(Copy, Clone, Eq, Ord, Debug)]
+fn merge_rec<T: Clone>(arguments: &mut Vec<T>, size: usize,
+                       merge: fn(T, T) -> T, identity: &T) -> T {
+    if size > 2 {
+        let left_size = size / 2;
+        merge(merge_rec(arguments, left_size, merge, identity),
+              merge_rec(arguments, size - left_size, merge, identity))
+    }
+    else {
+        match (arguments.pop(), arguments.pop()) {
+            (Some(a), Some(b)) => merge(a, b),
+            (Some(x), None) | (None, Some(x)) => x,
+            (None, None) => identity.clone()
+        }
+    }
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Ord, Debug)]
 pub struct Rational { n: i32, d: u32 }
 const ZERO: Rational = Rational { n: 0, d: 1 };
 const ONE: Rational = Rational { n: 1, d: 1 };
@@ -66,12 +82,6 @@ impl fmt::Display for Rational {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.d == 1 { f.write_fmt(format_args!("{}", self.n)) }
         else { f.write_fmt(format_args!("({}/{})", self.n, self.d)) }
-    }
-}
-
-impl PartialEq<Self> for Rational {
-    fn eq(&self, other: &Self) -> bool {
-        (self.n == other.n) && (self.d == other.d)
     }
 }
 
@@ -198,9 +208,12 @@ impl From<Rational> for Scalar {
 
 impl From<Exponential> for Scalar {
     fn from(exponential: Exponential) -> Self {
-        if exponential.e == ONE { exponential.b }
-        else if exponential.e == ZERO { Scalar::from(ONE) }
-        else { Scalar::Product(vec![exponential]) }
+        match exponential.e {
+            ZERO => Scalar::Rational(ONE),
+            ONE => exponential.b,
+            _ => if exponential.b == ONE { Scalar::Rational(ONE) }
+                 else { Scalar::Product(vec![exponential]) }
+        }
     }
 }
 
@@ -287,7 +300,7 @@ impl ops::Add for Scalar {
                 new_terms.append(&mut Vec::from(lhs));
                 new_terms.append(&mut Vec::from(rhs));
                 //println!("Final sum: {:?}", new_terms);
-                Scalar::Sum(new_terms)
+                Scalar::Sum(new_terms).correct_form()
             }
             (lhs, rhs) => {
                 if lhs == ZERO { return rhs; }
@@ -313,7 +326,7 @@ impl ops::Sub for Scalar {
 impl ops::Mul for Scalar {
     type Output = Self;
     fn mul(self, rhs: Self) -> Self::Output {
-        const EXPECT_ERR: &str = "term should not be empty";
+        const EXPECT_ERR: &str = "factor should not be empty";
 
         match (self, rhs) {
             (Scalar::Rational(lhs), Scalar::Rational(rhs)) => Scalar::Rational(lhs * rhs),
@@ -338,7 +351,7 @@ impl ops::Mul for Scalar {
                 }
                 new_factors.append(&mut Vec::from(lhs));
                 new_factors.append(&mut Vec::from(rhs));
-                Scalar::Product(new_factors)
+                Scalar::Product(new_factors).correct_form()
             }
             (lhs, rhs) => {
                 if lhs == ZERO || rhs == ZERO { return Scalar::from(ZERO); }
@@ -357,14 +370,16 @@ impl ops::Mul for Scalar {
 impl ops::BitXor<Rational> for Scalar {
     type Output = Self;
     fn bitxor(self, exp: Rational) -> Self::Output {
-        if exp == ZERO { Scalar::from(ONE) }
-        else if exp == ONE { self }
-        else {
-            match self {
+        match exp {
+            ZERO => Scalar::from(ONE),
+            ONE => self,
+            _ => match self {
+                /*
                 Scalar::Rational(x) => {
                     if exp.d == 1 { Scalar::Rational(x ^ exp.n) }
                     else { Scalar::Product(vec![Exponential { b: Scalar::Rational(x), e: exp }]) }
                 }
+                 */
                 Scalar::Product(mut factors) => {
                     for factor in &mut factors {
                         (*factor).e = (*factor).e * exp;
@@ -473,14 +488,7 @@ const RULES: [fn(&Scalar) -> Vec<Scalar>; 2] = [
                                         break;
                                     }
                                 }
-                                match factors.len() {
-                                    0 => Scalar::Rational(ONE),
-                                    1 => match factors.pop() {
-                                        Some(one_factor) => one_factor.b ^ one_factor.e,
-                                        None => Scalar::Rational(ONE)
-                                    }
-                                    _ => Scalar::Product(factors)
-                                }
+                                Scalar::Product(factors).correct_form()
                             }
                             _ => Scalar::Rational(ONE)
                         }
@@ -492,17 +500,16 @@ const RULES: [fn(&Scalar) -> Vec<Scalar>; 2] = [
                             let exp: Rational = if exp1.abs() < exp2.abs() { exp1 }
                                                 else { exp2 };
                             let mut new_terms: Vec<Scalar> = terms.clone();
-                            let init_last_index = new_terms.len() - 1;
-                            let term1 = new_terms.swap_remove(index1);
-                            let term2 = new_terms.swap_remove(
-                                if index2 == init_last_index { index1 }
-                                else { index2 }
+                            let term1 = new_terms.remove(index1);
+                            let term2 = new_terms.remove(
+                                if index2 < index1 { index2 }
+                                else { index2 - 1 }
                             );
-                            new_terms.push((factor.clone() ^ exp) *
-                                           (remove_factor(term1, &factor, exp) +
-                                            remove_factor(term2, &factor, exp)));
 
-                            factorizations.push(add_all(new_terms));
+                            factorizations.push(Scalar::Sum(new_terms).correct_form() +
+                                                (factor.clone() ^ exp) *
+                                                (remove_factor(term1, &factor, exp) +
+                                                 remove_factor(term2, &factor, exp)));
                         }
                     }
                 }
@@ -512,34 +519,13 @@ const RULES: [fn(&Scalar) -> Vec<Scalar>; 2] = [
         _ => Vec::new()
     },
 
-    |x| match x {                                          // Partial Distribution
+    |x| match x {                                           // Partial Distribution
         Scalar::Product(factors) => {
-            /*
-            for each factor (factor1)
-                for each other factor, if its base is a sum
-                    for each term of sum
-                        distribute factor1 into the term and into the rest of the sum
-
-             f * (a + b)^e = f * (a + b) * (a + b)^(e - 1)
-             (f^e) * (a + b)^e
-
-             */
             let mut distributions: Vec<Scalar> = Vec::new();
             for index1 in 0..factors.len() {
                 for index2 in 0..factors.len() {
                     if let Scalar::Sum(_) = &(factors[index2].b) {
-
-                        fn remove_factor(factors: &mut Vec<Exponential>,
-                                         index: usize, exp: Rational) {
-                            let new_exp = factors[index].e - exp;
-                            if new_exp == ZERO {
-                                factors[index] = Exponential { b: Scalar::Rational(ONE), e: ONE };
-                            }
-                            else {
-                                factors[index].e = new_exp;
-                            }
-                        }
-
+                        // distribute factor into another factor
                         if factors[index1].e == factors[index2].e && index1 != index2 {
                             let mut other_factors: Vec<Exponential> = factors.clone();
                             let distributed: Scalar = other_factors.remove(index1).b;
@@ -548,29 +534,36 @@ const RULES: [fn(&Scalar) -> Vec<Scalar>; 2] = [
                                 else { index2 - 1 }
                             ).b {
                                 Scalar::Sum(terms) => terms,
-                                _ => panic!("Uh oh")
+                                non_a_sum => panic!("{non_a_sum} was expected to be a sum")
                             };
-                            let other_factors = match other_factors.len() {
-                                0 => Scalar::Rational(ONE),
-                                1 => {
-                                    let x = other_factors.pop().expect("Factor is missing");
-                                    x.b ^ x.e
-                                },
-                                _ => Scalar::Product(other_factors)
-                            };
+                            let other_factors = Scalar::Product(other_factors).correct_form();
 
                             for i in 0..terms.len() {
                                 let mut other_terms = terms.clone();
                                 let term = other_terms.remove(i);
                                 distributions.push(other_factors.clone() * (
                                     distributed.clone() * term +
-                                    distributed.clone() * Scalar::Sum(other_terms)
+                                    distributed.clone() * Scalar::Sum(other_terms).correct_form()
                                 ));
                             }
                         }
+
+                        // distribute factor into itself
                         if (if index1 == index2 { factors[index2].e - factors[index1].e }
-                            else { factors[index2].e })
-                            >= ONE {
+                            else { factors[index2].e }) >= ONE {
+
+                            fn remove_factor(factors: &mut Vec<Exponential>,
+                                             index: usize, exp: Rational) {
+                                let new_exp = factors[index].e - exp;
+                                if new_exp == ZERO {
+                                    factors[index] = Exponential { b: Scalar::Rational(ONE),
+                                                                   e: ONE };
+                                }
+                                else {
+                                    factors[index].e = new_exp;
+                                }
+                            }
+
                             let mut new_factors: Vec<Exponential> = factors.clone();
 
                         }
@@ -603,33 +596,39 @@ impl Simplifier {
         }
     }
 
-    fn derive (&mut self, expr: Scalar, expr_placeholder: &Scalar, full_template: Scalar) {
+    fn derive(expr: &Scalar) -> Vec<Scalar> {
+        let mut transformed: Vec<Scalar> = Vec::new();
         for rule in &RULES {
-            for trans_expr in (*rule)(&expr) {
-                self.discover(full_template.clone().replace(expr_placeholder, &trans_expr));
+            transformed.append(&mut (*rule)(expr));
+        }
+        match expr {
+            Scalar::Sum(terms) => {
+                for i in 0..terms.len() {
+                    for trans_term in Simplifier::derive(&terms[i]) {
+                        let mut new_terms: Vec<Scalar> = terms.clone();
+                        new_terms.remove(i);
+                        transformed.push(Scalar::Sum(new_terms).correct_form() + trans_term);
+                    }
+                }
             }
+            Scalar::Product(factors) => {
+                for i in 0..factors.len() {
+                    for trans_factor in Simplifier::derive(&factors[i].b) {
+                        let mut new_factors: Vec<Exponential> = factors.clone();
+                        new_factors.remove(i);
+                        transformed.push(Scalar::Product(new_factors).correct_form() *
+                                         (trans_factor ^ factors[i].e));
+                    }
+                }
+            }
+            _ => {}
         }
+        transformed
     }
 }
 
 
 
-
-fn merge_rec<T: Clone>(arguments: &mut Vec<T>, size: usize,
-                merge: fn(T, T) -> T, identity: &T) -> T {
-    if size > 2 {
-        let left_size = size / 2;
-        merge(merge_rec(arguments, left_size, merge, identity),
-              merge_rec(arguments, size - left_size, merge, identity))
-    }
-    else {
-        match (arguments.pop(), arguments.pop()) {
-            (Some(a), Some(b)) => merge(a, b),
-            (Some(x), None) | (None, Some(x)) => x,
-            (None, None) => identity.clone()
-        }
-    }
-}
 
 fn merge_scalars(arguments: Vec<Scalar>, merge: fn(Scalar, Scalar) -> Scalar, identity: &Scalar)
                  -> Scalar {
@@ -701,6 +700,29 @@ impl Scalar {
         }
     }
 
+    // use on a Scalar that may have an incorrect form (like a sum with one term)
+    fn correct_form(self) -> Self {
+        match self {
+            Scalar::Sum(mut terms) => match terms.len() {
+                0 => Scalar::Rational(ZERO),
+                1 => match terms.pop() {
+                    Some(only_term) => only_term,
+                    None => Scalar::Rational(ZERO)
+                }
+                _ => Scalar::Sum(terms)
+            }
+            Scalar::Product(mut factors) => match factors.len() {
+                0 => Scalar::Rational(ONE),
+                1 => match factors.pop() {
+                    Some(only_factor) => Scalar::from(only_factor),
+                    None => Scalar::Rational(ONE)
+                }
+                _ => Scalar::Product(factors)
+            }
+            x => x
+        }
+    }
+
     fn is_constant(&self) -> bool {
         match self {
             Scalar::Rational(_) => true,
@@ -745,7 +767,7 @@ impl Scalar {
     }
 
     pub fn simplified(&self) -> Scalar {
-        let swap = Scalar::Variable(String::from(char::from_u32(0xD9E).unwrap()));
+        //let amogus = Scalar::Variable(String::from(char::from_u32(0xD9E).unwrap()));
 
         let mut simplifier = Simplifier {
             simplest: (self.clone(), self.cost()),
@@ -755,8 +777,11 @@ impl Scalar {
 
         simplifier.discover(self.clone());
         while let Some(next_expr) = simplifier.queue.pop() {
-            simplifier.derive(next_expr, &swap, swap.clone());
+            for derived in Simplifier::derive(&next_expr) {
+                simplifier.discover(derived);
+            }
         }
-        simplifier.simplest.0
+        let (simplest, least_cost) = simplifier.simplest;
+        simplest
     }
 }
