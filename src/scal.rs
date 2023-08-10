@@ -440,53 +440,52 @@ impl PartialOrd for ExprCost {
     }
 }
 
-const RULES: [fn(&Scalar) -> Vec<Scalar>; 2] = [
-    |x| match x {                                          // Factorization
+const RULES: [fn(&Scalar) -> Vec<Scalar>; 3] = [
+    // Factorization
+    |x| match x {
         Scalar::Sum(terms) => {
-            type FactorIndexer = BTreeMap<Scalar, Vec<(usize, Rational)>>;
-            fn index_factor(factors_indices: &mut FactorIndexer, term_index: usize,
-                            factor_base: &Scalar, factor_exp: Rational) {
+            #[derive(Copy, Clone)]
+            struct FactorIndex {
+                t_idx: usize,
+                f_idx: usize,
+                exp: Rational
+            }
+            type FactorIndexer = BTreeMap<Scalar, Vec<FactorIndex>>;
+
+            fn index_factor(factors_indices: &mut FactorIndexer,
+                            factor_base: &Scalar, factor_exp: Rational,
+                            term_index: usize, factor_index: usize) {
+                let index = FactorIndex { t_idx: term_index, f_idx: factor_index, exp: factor_exp };
                 match factors_indices.get_mut(factor_base) {
-                    Some(factor_indices) => factor_indices.push((term_index, factor_exp)),
-                    None => {
-                        factors_indices.insert(factor_base.clone(), vec![(term_index,
-                                                                          factor_exp)]);
-                    }
+                    Some(factor_indices) => factor_indices.push(index),
+                    None => { factors_indices.insert(factor_base.clone(), vec![index]); }
                 }
             }
 
             let mut factors_indices: FactorIndexer = BTreeMap::new();
-            let mut term_index: usize = 0;
-            for term in terms {
-                match term {
-                    Scalar::Product(factors) => {
-                        for factor in factors {
-                            index_factor(&mut factors_indices, term_index, &factor.b, factor.e);
+            for i in 0..terms.len() {
+                match &terms[i] {
+                    Scalar::Product(factors) =>
+                        for j in 0..factors.len() {
+                            let factor = &factors[j];
+                            index_factor(&mut factors_indices, &factor.b, factor.e, i, j);
                         }
-                    }
-                    x => index_factor(&mut factors_indices, term_index, &x, ONE)
+                    x => index_factor(&mut factors_indices, &x, ONE, i, 0)
                 }
-                term_index += 1;
             }
 
             let mut factorizations: Vec<Scalar> = Vec::new();
             for (factor, indices) in factors_indices {
                 for i in 0..(indices.len() - 1) {
 
-                    // ASSUMES THAT term CONTAINS factor
-                    fn remove_factor(term: Scalar, factor: &Scalar, exp: Rational) -> Scalar {
+                    fn remove_factor(term: Scalar, factor_index: usize, exp: Rational) -> Scalar {
                         match term {
                             Scalar::Product(mut factors) => {
-                                for j in 0..factors.len() {
-                                    if factors[j].b == *factor {
-                                        if factors[j].e == exp {
-                                            factors.remove(j);
-                                        }
-                                        else {
-                                            factors[j].e = factors[j].e - exp;
-                                        }
-                                        break;
-                                    }
+                                if factors[factor_index].e == exp {
+                                    factors.remove(factor_index);
+                                }
+                                else {
+                                    factors[factor_index].e = factors[factor_index].e - exp;
                                 }
                                 Scalar::Product(factors).correct_form()
                             }
@@ -494,22 +493,23 @@ const RULES: [fn(&Scalar) -> Vec<Scalar>; 2] = [
                         }
                     }
 
-                    let (index1, exp1) = indices[i];
-                    for &(index2, exp2) in &indices[(i + 1)..] {
+                    let FactorIndex { t_idx: t_idx1, f_idx: f_idx1, exp: exp1} = indices[i];
+                    for &FactorIndex { t_idx: t_idx2, f_idx: f_idx2, exp: exp2} in
+                        &indices[(i + 1)..] {
                         if (exp1.n < 0) == (exp2.n < 0) {
                             let exp: Rational = if exp1.abs() < exp2.abs() { exp1 }
                                                 else { exp2 };
                             let mut new_terms: Vec<Scalar> = terms.clone();
-                            let term1 = new_terms.remove(index1);
+                            let term1 = new_terms.remove(t_idx1);
                             let term2 = new_terms.remove(
-                                if index2 < index1 { index2 }
-                                else { index2 - 1 }
+                                if t_idx2 < t_idx1 { t_idx2 }
+                                else { t_idx2 - 1 }
                             );
 
                             factorizations.push(Scalar::Sum(new_terms).correct_form() +
                                                 (factor.clone() ^ exp) *
-                                                (remove_factor(term1, &factor, exp) +
-                                                 remove_factor(term2, &factor, exp)));
+                                                (remove_factor(term1, f_idx1, exp) +
+                                                 remove_factor(term2, f_idx2, exp)));
                         }
                     }
                 }
@@ -519,25 +519,31 @@ const RULES: [fn(&Scalar) -> Vec<Scalar>; 2] = [
         _ => Vec::new()
     },
 
-    |x| match x {                                           // Partial Distribution
+    // Distribution and combination of rational-based exponentials
+    |x| match x {
         Scalar::Product(factors) => {
             let mut distributions: Vec<Scalar> = Vec::new();
             for index1 in 0..factors.len() {
                 for index2 in 0..factors.len() {
-                    if let Scalar::Sum(_) = &(factors[index2].b) {
-                        // distribute factor into another factor
-                        if factors[index1].e == factors[index2].e && index1 != index2 {
-                            let mut other_factors: Vec<Exponential> = factors.clone();
-                            let distributed: Scalar = other_factors.remove(index1).b;
-                            let terms: Vec<Scalar> = match other_factors.remove(
-                                if index2 < index1 { index2 }
-                                else { index2 - 1 }
-                            ).b {
-                                Scalar::Sum(terms) => terms,
-                                non_a_sum => panic!("{non_a_sum} was expected to be a sum")
-                            };
-                            let other_factors = Scalar::Product(other_factors).correct_form();
-
+                    // Combination of rational-based exponentials
+                    if let (Exponential { b: Scalar::Rational(b1), e: e1 },
+                            Exponential { b: Scalar::Rational(b2), e: e2 }) =
+                           (&factors[index1], &factors[index2]) {
+                        let e_ratio = *e2 / *e1;
+                        if index1 != index2 && e_ratio.d == 1 {
+                            let (b1, b2) = (*b1, *b2);
+                            let e1 = *e1;
+                            let mut other_factors = factors.clone();
+                            other_factors.remove(index1);
+                            other_factors.remove(if index2 < index1 { index2 } else {index2 - 1 });
+                            distributions.push(Scalar::Product(other_factors).correct_form() *
+                                               (Scalar::Rational(b1 * (b2 ^ e_ratio.n)) ^ e1));
+                        }
+                    }
+                    // Distribution
+                    else if let Scalar::Sum(_) = &(factors[index2].b) {
+                        fn distribute(distributions: &mut Vec<Scalar>, other_factors: Scalar,
+                                      terms: Vec<Scalar>, distributed: Scalar) {
                             for i in 0..terms.len() {
                                 let mut other_terms = terms.clone();
                                 let term = other_terms.remove(i);
@@ -548,20 +554,42 @@ const RULES: [fn(&Scalar) -> Vec<Scalar>; 2] = [
                             }
                         }
 
+                        // distribute factor into another factor
+                        if factors[index1].e == factors[index2].e && index1 != index2 {
+                            let mut other_factors: Vec<Exponential> = factors.clone();
+                            let distributed: Scalar = other_factors.remove(index1).b;
+                            let terms: Vec<Scalar> = match other_factors.remove(
+                                if index2 < index1 { index2 }
+                                else { index2 - 1 }
+                            ).b {
+                                Scalar::Sum(terms) => terms,
+                                not_a_sum => panic!("{not_a_sum} is not a sum")
+                            };
+
+                            distribute(&mut distributions,
+                                       Scalar::Product(other_factors).correct_form(),
+                                       terms, distributed);
+                        }
+
                         // distribute factor into itself
                         if (if index1 == index2 { factors[index2].e - factors[index1].e }
                             else { factors[index2].e }) >= ONE {
 
-                            fn remove_factor(factors: &mut Vec<Exponential>,
-                                             index: usize, exp: Rational) {
-                                let new_exp = factors[index].e - exp;
-                                if new_exp == ZERO {
-                                    factors[index] = Exponential { b: Scalar::Rational(ONE),
-                                                                   e: ONE };
+                            fn remove_factors(factors: &mut Vec<Exponential>,
+                                              index1: usize, exp1: Rational,
+                                              mut index2: usize, exp2: Rational) {
+                                let new_exp1 = factors[index1].e - exp1;
+                                if new_exp1 == ZERO {
+                                    factors.remove(index1);
+                                    if index2 > index1 {
+                                        index2 -= 1;
+                                    }
                                 }
-                                else {
-                                    factors[index].e = new_exp;
-                                }
+                                else { factors[index1].e = new_exp1 }
+
+                                let new_exp2 = factors[index2].e - exp2;
+                                if new_exp2 == ZERO { factors.remove(index2); }
+                                else { factors[index2].e = new_exp2 }
                             }
 
                             let mut new_factors: Vec<Exponential> = factors.clone();
@@ -571,6 +599,13 @@ const RULES: [fn(&Scalar) -> Vec<Scalar>; 2] = [
                 }
             }
             distributions
+        }
+        _ => Vec::new()
+    },
+
+    |x| match x {
+        Scalar::Product(factors) => {
+            Vec::new()
         }
         _ => Vec::new()
     }
