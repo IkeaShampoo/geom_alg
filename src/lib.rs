@@ -1,4 +1,6 @@
 mod scal;
+mod ga;
+mod algebra_tools;
 
 #[cfg(test)]
 mod tests {

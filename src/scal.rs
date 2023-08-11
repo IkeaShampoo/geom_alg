@@ -1,4 +1,6 @@
-use std::cmp;
+use super::algebra_tools::*;
+
+use std::cmp::Ordering;
 use std::fmt;
 use std::ops;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -15,38 +17,10 @@ fn gcd(a: u32, b: u32) -> u32 {
     y
 }
 
-fn iterative_mul<T: ops::Mul<Output = T> + Copy>(identity: T, base: T, exp: u32) -> T {
-    let mut product = identity;
-    let mut base_to_i = identity;
-    for i in 0..u32::BITS {
-        if ((exp >> i) & 1) == 1 {
-            product = product * base_to_i;
-        }
-        base_to_i = base_to_i * base;
-    }
-    product
-}
-
-fn merge_rec<T: Clone>(arguments: &mut Vec<T>, size: usize,
-                       merge: fn(T, T) -> T, identity: &T) -> T {
-    if size > 2 {
-        let left_size = size / 2;
-        merge(merge_rec(arguments, left_size, merge, identity),
-              merge_rec(arguments, size - left_size, merge, identity))
-    }
-    else {
-        match (arguments.pop(), arguments.pop()) {
-            (Some(a), Some(b)) => merge(a, b),
-            (Some(x), None) | (None, Some(x)) => x,
-            (None, None) => identity.clone()
-        }
-    }
-}
-
 #[derive(Copy, Clone, PartialEq, Eq, Ord, Debug)]
 pub struct Rational { n: i32, d: u32 }
-const ZERO: Rational = Rational { n: 0, d: 1 };
-const ONE: Rational = Rational { n: 1, d: 1 };
+pub const ZERO: Rational = Rational { n: 0, d: 1 };
+pub const ONE: Rational = Rational { n: 1, d: 1 };
 
 impl Rational {
     pub fn new(num: i32, den: i32) -> Rational {
@@ -86,11 +60,11 @@ impl fmt::Display for Rational {
 }
 
 impl PartialOrd for Rational {
-    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         let diff_n: i32 = (self.clone() - other.clone()).n;
-        if diff_n < 0 { return Some(cmp::Ordering::Less); }
-        if diff_n > 0 { return Some(cmp::Ordering::Greater); }
-        Some(cmp::Ordering::Equal)
+        if diff_n < 0 { return Some(Ordering::Less); }
+        if diff_n > 0 { return Some(Ordering::Greater); }
+        Some(Ordering::Equal)
     }
 }
 
@@ -138,7 +112,7 @@ impl ops::BitXor<i32> for Rational {
         if exp < 0 {
             base = ONE / base;
         }
-        iterative_mul(ONE, base, exp.unsigned_abs())
+        exponentiate(ONE, base, exp.unsigned_abs())
     }
 }
 
@@ -169,11 +143,11 @@ impl PartialEq<Self> for Exponential {
 }
 
 impl PartialOrd for Exponential {
-    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         let (Exponential { b: lb, e: le },
              Exponential { b: rb, e: re }) = (self, other);
         let b_order = lb.partial_cmp(rb);
-        if b_order == Some(cmp::Ordering::Equal) { le.partial_cmp(re) }
+        if b_order == Some(Ordering::Equal) { le.partial_cmp(re) }
         else { b_order }
     }
 }
@@ -187,6 +161,8 @@ pub enum Scalar {
     Sum(Vec<Scalar>),
     Product(Vec<Exponential>),
 }
+pub const S_ZERO: Scalar = Scalar::Rational(ZERO);
+pub const S_ONE: Scalar = Scalar::Rational(ONE);
 
 impl From<String> for Scalar {
     fn from(name: String) -> Self {
@@ -209,9 +185,9 @@ impl From<Rational> for Scalar {
 impl From<Exponential> for Scalar {
     fn from(exponential: Exponential) -> Self {
         match exponential.e {
-            ZERO => Scalar::Rational(ONE),
+            ZERO => S_ONE,
             ONE => exponential.b,
-            _ => if exponential.b == ONE { Scalar::Rational(ONE) }
+            _ => if exponential.b == ONE { S_ONE }
                  else { Scalar::Product(vec![exponential]) }
         }
     }
@@ -326,7 +302,7 @@ impl ops::Sub for Scalar {
 impl ops::Mul for Scalar {
     type Output = Self;
     fn mul(self, rhs: Self) -> Self::Output {
-        const EXPECT_ERR: &str = "factor should not be empty";
+        const EXPECT_ERR: &str = "Factor does not exist";
 
         match (self, rhs) {
             (Scalar::Rational(lhs), Scalar::Rational(rhs)) => Scalar::Rational(lhs * rhs),
@@ -337,7 +313,7 @@ impl ops::Mul for Scalar {
                 while let (Some(lhs_next), Some(rhs_next)) = (lhs.front(), rhs.front()) {
                     let order = (lhs_next.b).cmp(&rhs_next.b);
                     match order {
-                        cmp::Ordering::Equal => {
+                        Ordering::Equal => {
                             let exp = lhs_next.e + rhs_next.e;
                             let base = rhs.pop_front().expect(EXPECT_ERR).b;
                             lhs.pop_front();
@@ -345,8 +321,8 @@ impl ops::Mul for Scalar {
                                 new_factors.push(Exponential { b: base, e: exp });
                             }
                         }
-                        cmp::Ordering::Less => new_factors.push(lhs.pop_front().expect(EXPECT_ERR)),
-                        cmp::Ordering::Greater => new_factors.push(rhs.pop_front().expect(EXPECT_ERR))
+                        Ordering::Less => new_factors.push(lhs.pop_front().expect(EXPECT_ERR)),
+                        Ordering::Greater => new_factors.push(rhs.pop_front().expect(EXPECT_ERR))
                     }
                 }
                 new_factors.append(&mut Vec::from(lhs));
@@ -433,9 +409,9 @@ impl ops::Add for ExprCost {
 }
 
 impl PartialOrd for ExprCost {
-    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         let v_order = self.v.cmp(&other.v);
-        if v_order == cmp::Ordering::Equal { Some(self.c.cmp(&other.c)) }
+        if v_order == Ordering::Equal { Some(self.c.cmp(&other.c)) }
         else { Some(v_order) }
     }
 }
@@ -489,7 +465,7 @@ const RULES: [fn(&Scalar) -> Vec<Scalar>; 3] = [
                                 }
                                 Scalar::Product(factors).correct_form()
                             }
-                            _ => Scalar::Rational(ONE)
+                            _ => S_ONE
                         }
                     }
 
@@ -664,21 +640,14 @@ impl Simplifier {
 
 
 
-
-fn merge_scalars(arguments: Vec<Scalar>, merge: fn(Scalar, Scalar) -> Scalar, identity: &Scalar)
-                 -> Scalar {
-    let init_size = arguments.len();
-    merge_rec(&mut { arguments }, init_size, merge, identity)
-}
-
+#[inline(always)]
 fn add_all(terms: Vec<Scalar>) -> Scalar {
-    merge_scalars(terms, |x, y| x + y, &Scalar::from(ZERO))
+    merge_all(terms, |x, y| x + y, &Scalar::from(ZERO))
 }
-
+#[inline(always)]
 fn mul_all(factors: Vec<Scalar>) -> Scalar {
-    merge_scalars(factors, |x, y| x * y, &Scalar::from(ONE))
+    merge_all(factors, |x, y| x * y, &Scalar::from(ONE))
 }
-
 fn mul_exp(factors: Vec<Exponential>) -> Scalar {
     let mut new_factors: Vec<Scalar> = Vec::with_capacity(factors.len());
     for factor in factors {
@@ -739,18 +708,18 @@ impl Scalar {
     fn correct_form(self) -> Self {
         match self {
             Scalar::Sum(mut terms) => match terms.len() {
-                0 => Scalar::Rational(ZERO),
+                0 => S_ZERO,
                 1 => match terms.pop() {
                     Some(only_term) => only_term,
-                    None => Scalar::Rational(ZERO)
+                    None => S_ZERO
                 }
                 _ => Scalar::Sum(terms)
             }
             Scalar::Product(mut factors) => match factors.len() {
-                0 => Scalar::Rational(ONE),
+                0 => S_ONE,
                 1 => match factors.pop() {
                     Some(only_factor) => Scalar::from(only_factor),
-                    None => Scalar::Rational(ONE)
+                    None => S_ONE
                 }
                 _ => Scalar::Product(factors)
             }
@@ -816,7 +785,7 @@ impl Scalar {
                 simplifier.discover(derived);
             }
         }
-        let (simplest, least_cost) = simplifier.simplest;
+        let (simplest, _) = simplifier.simplest;
         simplest
     }
 }
