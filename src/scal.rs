@@ -30,17 +30,14 @@ impl Rational {
         let gcd_nd: u32 = gcd(n.unsigned_abs(), d);
         return Rational { n: n / (gcd_nd as i32), d: d / gcd_nd };
     }
-
     pub fn min(a: Rational, b: Rational) -> Rational {
         if a < b { a }
         else { b }
     }
-
     pub fn max(a: Rational, b: Rational) -> Rational {
         if a > b { a }
         else { b }
     }
-
     pub fn abs(self) -> Rational {
         Rational { n: self.n.abs(), d: self.d }
     }
@@ -169,19 +166,16 @@ impl From<String> for Scalar {
         Scalar::Variable(name)
     }
 }
-
 impl From<&str> for Scalar {
     fn from(name: &str) -> Self {
         Scalar::Variable(String::from(name))
     }
 }
-
 impl From<Rational> for Scalar {
     fn from(fraction: Rational) -> Self {
         Scalar::Rational(fraction)
     }
 }
-
 impl From<Exponential> for Scalar {
     fn from(exponential: Exponential) -> Self {
         match exponential.e {
@@ -192,7 +186,6 @@ impl From<Exponential> for Scalar {
         }
     }
 }
-
 impl TryInto<Vec<Scalar>> for Scalar {
     type Error = &'static str;
     fn try_into(self) -> Result<Vec<Scalar>, Self::Error> {
@@ -202,38 +195,12 @@ impl TryInto<Vec<Scalar>> for Scalar {
         }
     }
 }
-
 impl TryInto<Vec<Exponential>> for Scalar {
     type Error = &'static str;
     fn try_into(self) -> Result<Vec<Exponential>, Self::Error> {
         match self {
             Scalar::Product(factors) => Ok(factors),
             _ => Err("This is not a Scalar::Product")
-        }
-    }
-}
-
-impl fmt::Display for Scalar {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Scalar::Rational(s) => Rational::fmt(s, f),
-            Scalar::Variable(s) => f.write_str(s.as_str()),
-            Scalar::Sum(s) => {
-                f.write_str("(")?;
-                for i in 0..s.len() {
-                    if i > 0 { f.write_str(" + ")?; }
-                    Scalar::fmt(&s[i],f)?;
-                }
-                f.write_str(")")
-            },
-            Scalar::Product(s) => {
-                f.write_str("(")?;
-                for i in 0..s.len() {
-                    if i > 0 { f.write_str(" * ")?; }
-                    Exponential::fmt(&s[i], f)?;
-                }
-                f.write_str(")")
-            }
         }
     }
 }
@@ -288,14 +255,6 @@ impl ops::Add for Scalar {
                 Scalar::Sum(old_terms) + Scalar::Sum(vec![new_term])
             }
         }
-    }
-}
-
-impl ops::Sub for Scalar {
-    type Output = Self;
-    fn sub(self, rhs: Self) -> Self::Output {
-        if self == rhs { Scalar::from(ZERO) }
-        else { self + -rhs }
     }
 }
 
@@ -368,6 +327,19 @@ impl ops::BitXor<Rational> for Scalar {
     }
 }
 
+impl ops::Sub for Scalar {
+    type Output = Self;
+    fn sub(self, rhs: Self) -> Self::Output {
+        if self == rhs { Scalar::from(ZERO) }
+        else { self + -rhs }
+    }
+}
+impl ops::Neg for Scalar {
+    type Output = Self;
+    fn neg(self) -> Self {
+        Scalar::Rational(-ONE) * self
+    }
+}
 impl ops::Div for Scalar {
     type Output = Self;
     fn div(self, rhs: Self) -> Self {
@@ -375,10 +347,28 @@ impl ops::Div for Scalar {
     }
 }
 
-impl ops::Neg for Scalar {
-    type Output = Self;
-    fn neg(self) -> Self {
-        Scalar::Rational(-ONE) * self
+impl fmt::Display for Scalar {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Scalar::Rational(s) => Rational::fmt(s, f),
+            Scalar::Variable(s) => f.write_str(s.as_str()),
+            Scalar::Sum(s) => {
+                f.write_str("(")?;
+                for i in 0..s.len() {
+                    if i > 0 { f.write_str(" + ")?; }
+                    Scalar::fmt(&s[i],f)?;
+                }
+                f.write_str(")")
+            },
+            Scalar::Product(s) => {
+                f.write_str("(")?;
+                for i in 0..s.len() {
+                    if i > 0 { f.write_str(" * ")?; }
+                    Exponential::fmt(&s[i], f)?;
+                }
+                f.write_str(")")
+            }
+        }
     }
 }
 
@@ -579,6 +569,7 @@ const RULES: [fn(&Scalar) -> Vec<Scalar>; 3] = [
         _ => Vec::new()
     },
 
+    // (Not Started) Exponentiation of rational-based exponentials
     |x| match x {
         Scalar::Product(factors) => {
             Vec::new()
@@ -705,6 +696,7 @@ impl Scalar {
     }
 
     // use on a Scalar that may have an incorrect form (like a sum with one term)
+    // does not re-order unordered subexpressions
     fn correct_form(self) -> Self {
         match self {
             Scalar::Sum(mut terms) => match terms.len() {

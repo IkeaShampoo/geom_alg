@@ -1,9 +1,9 @@
 use super::algebra_tools::*;
 use super::scal::*;
 
-use std::cmp::Ordering;
-use std::ops;
+use std::cmp::{max, min, Ordering};
 use std::collections::VecDeque;
+use std::{fmt, mem, ops};
 
 /// Canonical basis vector
 #[derive(Clone, Eq, Ord)]
@@ -13,7 +13,7 @@ pub struct CBVec {
 }
 
 /// Product of canonical basis vectors and scalars
-#[derive(Clone, Eq, Ord)]
+#[derive(Clone)]
 pub struct KBlade {
     /// Normalized form
     n: Vec<CBVec>,
@@ -31,7 +31,7 @@ pub struct MVec {
 #[derive(Clone)]
 pub struct KVec {
     v: MVec,
-    k: u32
+    k: usize
 }
 
 
@@ -51,6 +51,16 @@ impl From<KBlade> for MVec {
         MVec { blades: vec![b] }
     }
 }
+impl From<KBlade> for KVec {
+    fn from(b: KBlade) -> Self {
+        KVec { k: b.grade(), v: MVec::from(b) }
+    }
+}
+impl From<KVec> for MVec {
+    fn from(v: KVec) -> Self {
+        v.v
+    }
+}
 
 
 
@@ -65,18 +75,35 @@ impl PartialOrd<Self> for CBVec {
     }
 }
 
-impl PartialEq<Self> for KBlade {
-    fn eq(&self, other: &Self) -> bool {
-        self.n.eq(&other.n)
-    }
-}
-impl PartialOrd<Self> for KBlade {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.n.partial_cmp(&other.n)
-    }
-}
 
 
+impl ops::Add for MVec {
+    type Output = Self;
+    fn add(self, rhs: Self) -> Self::Output {
+        let mut lhs: VecDeque<KBlade> = VecDeque::from(self.blades);
+        let mut rhs: VecDeque<KBlade> = VecDeque::from(rhs.blades);
+        let mut new_blades: Vec<KBlade> = Vec::with_capacity(lhs.len() + rhs.len());
+        while let (Some(lhs_next), Some(rhs_next)) = (lhs.front(), rhs.front()) {
+            match lhs_next.n.cmp(&rhs_next.n) {
+                Ordering::Less => new_blades.push(lhs.pop_front().unwrap()),
+                Ordering::Equal => {
+                    let (lhs_next, rhs_next) = (lhs.pop_front().unwrap(), rhs.pop_front().unwrap());
+                    let new_blade = KBlade {
+                        n: lhs_next.n,
+                        c: (lhs_next.c + rhs_next.c).simplified()
+                    };
+                    if new_blade.c != S_ZERO {
+                        new_blades.push(new_blade);
+                    }
+                }
+                Ordering::Greater => new_blades.push(rhs.pop_front().unwrap())
+            }
+        }
+        new_blades.append(&mut Vec::from(lhs));
+        new_blades.append(&mut Vec::from(rhs));
+        MVec { blades: new_blades }
+    }
+}
 
 impl ops::Mul for KBlade {
     type Output = Self;
@@ -103,34 +130,27 @@ impl ops::Mul for KBlade {
         new_normal.append(&mut Vec::from(lhs));
         new_normal.append(&mut Vec::from(rhs));
         if sign_changes >> 1 == 1 {
-            coefficient = coefficient * -S_ONE;
+            coefficient = coefficient * Scalar::Rational(-ONE);
         }
         KBlade { n: new_normal, c: coefficient }
     }
 }
 
-impl ops::Add for MVec {
+impl ops::Mul<Scalar> for MVec {
     type Output = Self;
-    fn add(self, rhs: Self) -> Self::Output {
-        let mut lhs: VecDeque<KBlade> = VecDeque::from(self.blades);
-        let mut rhs: VecDeque<KBlade> = VecDeque::from(rhs.blades);
-        let mut new_blades: Vec<KBlade> = Vec::with_capacity(lhs.len() + rhs.len());
-        while let (Some(lhs_next), Some(rhs_next)) = (lhs.front(), rhs.front()) {
-            match lhs_next.cmp(&rhs_next) {
-                Ordering::Less => new_blades.push(lhs.pop_front().unwrap()),
-                Ordering::Equal => {
-                    let (lhs_next, rhs_next) = (lhs.pop_front().unwrap(), rhs.pop_front().unwrap());
-                    let new_blade = KBlade { n: lhs_next.n, c: lhs_next.c + rhs_next.c };
-                    if new_blade.c != S_ZERO {
-                        new_blades.push(new_blade);
-                    }
+    fn mul(mut self, rhs: Scalar) -> Self::Output {
+        match rhs {
+            S_ZERO => MVec { blades: Vec::new() },
+            s => {
+                let mut v = self;
+                for blade in &mut v.blades {
+                    let mut stupid_workaround_swap_thing = S_ONE;
+                    mem::swap(&mut blade.c, &mut stupid_workaround_swap_thing);
+                    blade.c = stupid_workaround_swap_thing / s.clone();
                 }
-                Ordering::Greater => new_blades.push(rhs.pop_front().unwrap())
+                v
             }
         }
-        new_blades.append(&mut Vec::from(lhs));
-        new_blades.append(&mut Vec::from(rhs));
-        MVec { blades: new_blades }
     }
 }
 
@@ -147,11 +167,153 @@ impl ops::Mul for MVec {
     }
 }
 
+impl ops::Neg for KBlade {
+    type Output = Self;
+    fn neg(self) -> Self::Output {
+        KBlade { n: self.n, c: self.c * Scalar::Rational(-ONE) }
+    }
+}
+impl ops::Neg for MVec {
+    type Output = Self;
+    fn neg(self) -> Self::Output {
+        self * Scalar::Rational(-ONE)
+    }
+}
+impl ops::Sub for MVec {
+    type Output = Self;
+    fn sub(self, rhs: Self) -> Self::Output {
+        self + -rhs
+    }
+}
+impl ops::Div for KBlade {
+    type Output = Self;
+    fn div(self, rhs: Self) -> Self::Output {
+        self * rhs.mul_inv()
+    }
+}
+impl ops::Div<KVec> for MVec {
+    type Output = Self;
+    fn div(self, rhs: KVec) -> Self::Output {
+        self * rhs.mul_inv().v
+    }
+}
+
+
+
+#[inline(always)]
+pub fn inner(a: KVec, b: KVec) -> KVec {
+    let grade = max(a.k, b.k) - min(a.k, b.k);
+    (a.v * b.v).to_grade(grade)
+}
+#[inline(always)]
+pub fn outer(a: KVec, b: KVec) -> KVec {
+    let grade = a.k + b.k;
+    (a.v * b.v).to_grade(grade)
+}
+#[inline(always)]
+pub fn join(a: KVec, b: KVec) -> KVec {
+    outer(a, b)
+}
+pub fn meet(a: KVec, b: KVec, space: KBlade) -> KVec {
+    let e = KVec::from(space.clone());
+    inner(outer(inner(a, e.clone()),
+                inner(b, e)),
+          KVec::from(space.mul_inv()))
+}
+
 
 
 impl KBlade {
+    pub fn grade(&self) -> usize {
+        self.n.len()
+    }
+    pub fn basis(&self) -> &Vec<CBVec> {
+        &self.n
+    }
+    pub fn coefficient(&self) -> &Scalar {
+        &self.c
+    }
+    pub fn coefficient_mut(&mut self) -> &mut Scalar {
+        &mut self.c
+    }
     pub fn mul_inv(self) -> Self {
         let square = (self.clone() * self.clone()).c;
         KBlade { n: self.n, c: self.c / square }
+    }
+}
+
+impl KVec {
+    pub fn blades(&self) -> &Vec<KBlade> {
+        &self.v.blades
+    }
+    pub fn num_blades(&self) -> usize {
+        self.v.blades.len()
+    }
+    pub fn coefficient_at(&self, index: usize) -> &Scalar {
+        &self.v.blades[index].c
+    }
+    pub fn coefficient_at_mut(&mut self, index: usize) -> &mut Scalar {
+        &mut self.v.blades[index].c
+    }
+    pub fn mul_inv(mut self) -> Self {
+        let square = match inner(self.clone(), self.clone()).v.blades.pop() {
+            Some(scalar) => scalar.c,
+            None => S_ZERO
+        };
+        KVec { v: self.v * square, k: self.k }
+    }
+
+}
+
+impl MVec {
+    pub fn blades(&self) -> &Vec<KBlade> {
+        &self.blades
+    }
+    pub fn num_blades(&self) -> usize {
+        self.blades.len()
+    }
+    pub fn coefficient_at(&self, index: usize) -> &Scalar {
+        &self.blades[index].c
+    }
+    pub fn coefficient_at_mut(&mut self, index: usize) -> &mut Scalar {
+        &mut self.blades[index].c
+    }
+    pub fn to_grade(self, grade: usize) -> KVec {
+        let mut new_blades: Vec<KBlade> = Vec::with_capacity(self.blades.len());
+        for blade in self.blades {
+            if blade.grade() == grade {
+                new_blades.push(blade);
+            }
+        }
+        KVec { v: MVec { blades: new_blades }, k: grade }
+    }
+}
+
+impl fmt::Display for CBVec {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_fmt(format_args!("e{}", self.id))
+    }
+}
+impl fmt::Display for KBlade {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.c.fmt(f)?;
+        for basis_vec in &self.n {
+            basis_vec.fmt(f)?;
+        }
+        Ok(())
+    }
+}
+impl fmt::Display for MVec {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for i in 0..self.blades.len() {
+            if i > 0 { f.write_str(" + ")?; }
+            self.blades[i].fmt(f)?;
+        }
+        Ok(())
+    }
+}
+impl fmt::Display for KVec {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.v.fmt(f)
     }
 }
