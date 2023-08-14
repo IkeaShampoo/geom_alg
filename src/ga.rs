@@ -305,24 +305,18 @@ impl KVec {
                 // increment least significant index
                 element_indices[last_element] += 1;
                 let mut last_incremented_index = last_element;
-                let mut next_element = element_indices[last_element];
-                for (prev_index, prev_element) in element_indices[0..grade]
-                                                        .iter_mut().rev().enumerate() {
-                    let next_index = prev_index + 1;
+                for i in (1..grade).rev() {
                     // (dimensions - 1) - indices[i] < (grade - 1) - i
                     // number of elements available < number of element slots on the right to fill
-                    if dimensions + next_index < grade + next_element {
+                    if dimensions + i < grade + element_indices[i] {
                         // increment element slot to left and later reset all slots to the right
-                        *prev_element += 1;
-                        next_element = *prev_element;
-                        last_incremented_index = prev_index;
+                        element_indices[i - 1] += 1;
+                        last_incremented_index = i - 1;
                     }
                 }
-                let mut prev_element = next_element;
                 // reset all elements to the right so their indices are increasing
-                for element_index in &mut element_indices[(last_incremented_index + 1)..] {
-                    prev_element += 1;
-                    *element_index = prev_element;
+                for i in (last_incremented_index + 1)..grade {
+                    element_indices[i] = element_indices[i - 1] + 1;
                 }
             }
 
