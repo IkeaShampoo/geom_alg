@@ -41,4 +41,6 @@ mod tests {
         let a_bcd = a.clone() * (b.clone() + c.clone() + d.clone());
         assert_eq!(ab_ac_ad.simplified().to_string(), a_bcd.to_string());
     }
+
+
 }

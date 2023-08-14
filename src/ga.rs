@@ -136,27 +136,44 @@ impl ops::Mul for KBlade {
     }
 }
 
+impl ops::Mul<Scalar> for KVec {
+    type Output = Self;
+    fn mul(self, rhs: Scalar) -> Self::Output {
+        KVec { v: self.v * rhs, k: self.k }
+    }
+}
+impl ops::Div<Scalar> for KVec {
+    type Output = Self;
+    fn div(self, rhs: Scalar) -> Self::Output {
+        KVec { v: self.v / rhs, k: self.k }
+    }
+}
+
 impl ops::Mul<Scalar> for MVec {
     type Output = Self;
-    fn mul(mut self, rhs: Scalar) -> Self::Output {
+    fn mul(self, rhs: Scalar) -> Self::Output {
         match rhs {
             S_ZERO => MVec { blades: Vec::new() },
             s => {
                 let mut v = self;
                 for blade in &mut v.blades {
-                    let mut stupid_workaround_swap_thing = S_ONE;
-                    mem::swap(&mut blade.c, &mut stupid_workaround_swap_thing);
-                    blade.c = stupid_workaround_swap_thing / s.clone();
+                    blade.c *= s.clone();
                 }
                 v
             }
         }
     }
 }
+impl ops::Div<Scalar> for MVec {
+    type Output = Self;
+    fn div(self, rhs: Scalar) -> Self::Output {
+        self * rhs.mul_inv()
+    }
+}
 
 impl ops::Mul for MVec {
     type Output = Self;
-    fn mul(self, rhs: Self) -> Self {
+    fn mul(self, rhs: Self) -> Self::Output {
         let (lhs, rhs) = (self, rhs);
         let mut unsorted_blades: Vec<MVec> = Vec::with_capacity(lhs.blades.len() *
                                                                 rhs.blades.len());
@@ -263,6 +280,55 @@ impl KVec {
         KVec { v: self.v * square, k: self.k }
     }
 
+    pub fn rename(self, name: &String) -> Self {
+        KVec { v: self.v.rename(name), k: self.k }
+    }
+    pub fn with_name(name: &String, basis: KBlade, grade: usize) -> Self {
+        let dimensions = basis.grade();
+        if grade == 0 {
+            KVec { v: MVec::from(KBlade::from(Scalar::from(name.clone()))), k: 0 }
+        }
+        else if grade > dimensions {
+            KVec { v: MVec::from(KBlade::from(S_ZERO)), k: grade }
+        }
+        else {
+            let mut blades: Vec<KBlade> = Vec::with_capacity(choose(dimensions, grade));
+            let mut element_indices: Vec<usize> = (0..grade).collect();
+            let last_element: usize = grade - 1;
+
+            while element_indices[last_element] < dimensions {
+                let blade_id = blades.len() + 1;
+                blades.push(KBlade {
+                    n: element_indices.iter().map(|i| basis.n[*i].clone()).collect(),
+                    c: Scalar::from(name.clone() + blade_id.to_string().as_str()) });
+
+                // increment least significant index
+                element_indices[last_element] += 1;
+                let mut last_incremented_index = last_element;
+                let mut next_element = element_indices[last_element];
+                for (prev_index, prev_element) in element_indices[0..grade]
+                                                        .iter_mut().rev().enumerate() {
+                    let next_index = prev_index + 1;
+                    // (dimensions - 1) - indices[i] < (grade - 1) - i
+                    // number of elements available < number of element slots on the right to fill
+                    if dimensions + next_index < grade + next_element {
+                        // increment element slot to left and later reset all slots to the right
+                        *prev_element += 1;
+                        next_element = *prev_element;
+                        last_incremented_index = prev_index;
+                    }
+                }
+                let mut prev_element = next_element;
+                // reset all elements to the right so their indices are increasing
+                for element_index in &mut element_indices[(last_incremented_index + 1)..] {
+                    prev_element += 1;
+                    *element_index = prev_element;
+                }
+            }
+
+            KVec { v: MVec { blades }, k: grade }
+        }
+    }
 }
 
 impl MVec {
@@ -286,6 +352,29 @@ impl MVec {
             }
         }
         KVec { v: MVec { blades: new_blades }, k: grade }
+    }
+
+    pub fn rename(self, name: &String) -> Self {
+        let mut renamed = self;
+        for (i, blade) in renamed.blades.iter_mut().enumerate() {
+            blade.c = Scalar::from(name.clone() + (i + 1).to_string().as_str());
+        }
+        renamed
+    }
+    pub fn with_name(name: &String, basis: KBlade, grade: usize) -> Self {
+        let dimensions = basis.grade();
+        let mut vectors: Vec<MVec> = Vec::with_capacity(grade);
+        let template_vector: MVec = {
+            let mut new_blades: Vec<KBlade> = Vec::with_capacity(dimensions);
+            for i in 0..dimensions {
+                new_blades.push(KBlade::from(basis.n[i].clone()));
+            }
+            MVec { blades: new_blades }
+        };
+        for i in 0..grade {
+            vectors.push(template_vector.clone().rename(&(i.to_string() + "_")));
+        }
+        merge_all(vectors, |a, b| a * b, &MVec { blades: Vec::new() }).rename(name)
     }
 }
 

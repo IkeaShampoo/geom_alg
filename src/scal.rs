@@ -1,8 +1,7 @@
 use super::algebra_tools::*;
 
 use std::cmp::Ordering;
-use std::fmt;
-use std::ops;
+use std::{fmt, mem, ops};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 fn gcd(a: u32, b: u32) -> u32 {
@@ -73,6 +72,12 @@ impl ops::Add for Rational {
     }
 }
 
+impl ops::Neg for Rational {
+    type Output = Self;
+    fn neg(self) -> Self::Output {
+        Rational {n: -self.n, d:self.d}
+    }
+}
 impl ops::Sub for Rational {
     type Output = Self;
     fn sub(self, rhs: Self) -> Self::Output {
@@ -87,18 +92,10 @@ impl ops::Mul for Rational {
         Rational::new(self.n * rhs.n, (self.d * rhs.d) as i32)
     }
 }
-
 impl ops::Div for Rational {
     type Output = Self;
     fn div(self, rhs: Self) -> Self::Output {
         Rational::new(self.n * rhs.d as i32, self.d as i32 * rhs.n)
-    }
-}
-
-impl ops::Neg for Rational {
-    type Output = Self;
-    fn neg(self) -> Self::Output {
-        Rational {n: -self.n, d:self.d}
     }
 }
 
@@ -211,6 +208,12 @@ impl PartialEq<Rational> for Scalar {
     }
 }
 
+fn make_stupid_workaround_scalar(x: &mut Scalar) -> Scalar {
+    let mut stupid_workaround_swap_thing = S_ONE;
+    mem::swap(x, &mut stupid_workaround_swap_thing);
+    stupid_workaround_swap_thing
+}
+
 impl ops::Add for Scalar {
     type Output = Self;
     fn add(self, rhs: Self) -> Self::Output {
@@ -257,6 +260,11 @@ impl ops::Add for Scalar {
         }
     }
 }
+impl ops::AddAssign for Scalar {
+    fn add_assign(&mut self, rhs: Self) {
+        *self = make_stupid_workaround_scalar(self) + rhs;
+    }
+}
 
 impl ops::Mul for Scalar {
     type Output = Self;
@@ -301,6 +309,11 @@ impl ops::Mul for Scalar {
         }
     }
 }
+impl ops::MulAssign for Scalar {
+    fn mul_assign(&mut self, rhs: Self) {
+        *self = make_stupid_workaround_scalar(self) * rhs;
+    }
+}
 
 impl ops::BitXor<Rational> for Scalar {
     type Output = Self;
@@ -334,6 +347,11 @@ impl ops::Sub for Scalar {
         else { self + -rhs }
     }
 }
+impl ops::SubAssign for Scalar {
+    fn sub_assign(&mut self, rhs: Self) {
+        *self = make_stupid_workaround_scalar(self) - rhs;
+    }
+}
 impl ops::Neg for Scalar {
     type Output = Self;
     fn neg(self) -> Self {
@@ -343,7 +361,12 @@ impl ops::Neg for Scalar {
 impl ops::Div for Scalar {
     type Output = Self;
     fn div(self, rhs: Self) -> Self {
-        self * (rhs ^ -ONE)
+        self * rhs.mul_inv()
+    }
+}
+impl ops::DivAssign for Scalar {
+    fn div_assign(&mut self, rhs: Self) {
+        *self = make_stupid_workaround_scalar(self) / rhs;
     }
 }
 
@@ -648,6 +671,10 @@ fn mul_exp(factors: Vec<Exponential>) -> Scalar {
 }
 
 impl Scalar {
+    pub fn mul_inv(self) -> Self {
+        self ^ -ONE
+    }
+
     fn replace(self, to_replace: &Scalar, replace_with: &Scalar) -> Scalar {
         match self {
             Scalar::Sum(terms) => {

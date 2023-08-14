@@ -1,5 +1,16 @@
 use std::ops;
 
+pub fn factorial(first: usize, last: usize) -> usize {
+    let mut result: usize = 1;
+    for i in first..=last {
+        result *= i;
+    }
+    result
+}
+pub fn choose(n: usize, k: usize) -> usize {
+    factorial(n - k + 1, n) / factorial(1, k)
+}
+
 pub fn exponentiate<T: ops::Mul<Output = T> + Copy>(identity: T, base: T, exp: u32) -> T {
     let mut product = identity;
     let mut base_to_i = identity;
