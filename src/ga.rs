@@ -6,14 +6,14 @@ use std::collections::VecDeque;
 use std::{fmt, mem, ops};
 
 /// Canonical basis vector
-#[derive(Clone, Eq, Ord)]
+#[derive(Clone, Eq)]
 pub struct CBVec {
     pub id: i32,
     pub square: Scalar
 }
 
 /// Product of canonical basis vectors and scalars
-#[derive(Clone, Eq, Ord)]
+#[derive(Clone, Eq)]
 pub struct KBlade {
     /// Normalized form
     n: Vec<CBVec>,
@@ -64,6 +64,11 @@ impl From<KVec> for MVec {
 
 
 
+impl Ord for CBVec {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.id.cmp(&other.id)
+    }
+}
 impl PartialEq<Self> for CBVec {
     fn eq(&self, other: &Self) -> bool {
         self.id.eq(&other.id)
@@ -75,6 +80,14 @@ impl PartialOrd<Self> for CBVec {
     }
 }
 
+impl Ord for KBlade {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match self.n.len().cmp(&other.n.len()) {
+            Ordering::Equal => self.n.cmp(&other.n),
+            x => x
+        }
+    }
+}
 impl PartialEq for KBlade {
     fn eq(&self, other: &Self) -> bool {
         self.n.eq(&other.n)
@@ -82,10 +95,7 @@ impl PartialEq for KBlade {
 }
 impl PartialOrd for KBlade {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        match self.n.len().cmp(&other.n.len()) {
-            Ordering::Equal => self.n.partial_cmp(&other.n),
-            x => Some(x)
-        }
+        Some(self.cmp(other))
     }
 }
 
@@ -104,7 +114,7 @@ impl ops::Add for MVec {
                     let (lhs_next, rhs_next) = (lhs.pop_front().unwrap(), rhs.pop_front().unwrap());
                     let new_blade = KBlade {
                         n: lhs_next.n,
-                        c: (lhs_next.c + rhs_next.c).simplified()
+                        c: (lhs_next.c + rhs_next.c)//.simplified()
                     };
                     if new_blade.c != S_ZERO {
                         new_blades.push(new_blade);
@@ -372,17 +382,10 @@ impl MVec {
         }
         renamed
     }
-    pub fn with_name(name: &String, basis: &KBlade, grade: usize) -> Self {
-        let dimensions = basis.grade();
-        let template_vector: MVec = {
-            let mut new_blades: Vec<KBlade> = Vec::with_capacity(dimensions);
-            for i in 0..dimensions {
-                new_blades.push(KBlade::from(basis.n[i].clone()));
-            }
-            MVec { blades: new_blades }
-        };
-        merge_all((0..grade)
-                      .map(|i| template_vector.clone().rename(&(i.to_string() + "_")))
+    pub fn with_name(name: &String, basis: &KBlade, max_grade: usize) -> Self {
+        let template = MVec { blades: basis.n.iter().map(|e| KBlade::from(e.clone())).collect() };
+        merge_all((0..max_grade)
+                      .map(|i| template.clone().rename(&(i.to_string() + "_")))
                       .collect(),
                   |a, b| a * b, &MVec { blades: Vec::new() }).rename(name)
     }

@@ -16,7 +16,7 @@ fn gcd(a: u32, b: u32) -> u32 {
     y
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Ord, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub struct Rational { n: i32, d: u32 }
 pub const ZERO: Rational = Rational { n: 0, d: 1 };
 pub const ONE: Rational = Rational { n: 1, d: 1 };
@@ -28,14 +28,6 @@ impl Rational {
             else { (num, den as u32) };
         let gcd_nd: u32 = gcd(n.unsigned_abs(), d);
         return Rational { n: n / (gcd_nd as i32), d: d / gcd_nd };
-    }
-    pub fn min(a: Rational, b: Rational) -> Rational {
-        if a < b { a }
-        else { b }
-    }
-    pub fn max(a: Rational, b: Rational) -> Rational {
-        if a > b { a }
-        else { b }
     }
     pub fn abs(self) -> Rational {
         Rational { n: self.n.abs(), d: self.d }
@@ -55,12 +47,17 @@ impl fmt::Display for Rational {
     }
 }
 
+impl Ord for Rational {
+    fn cmp(&self, other: &Self) -> Ordering {
+        let diff_n: i32 = (self.clone() - other.clone()).n;
+        if diff_n < 0 { return Ordering::Less; }
+        if diff_n > 0 { return Ordering::Greater; }
+        Ordering::Equal
+    }
+}
 impl PartialOrd for Rational {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        let diff_n: i32 = (self.clone() - other.clone()).n;
-        if diff_n < 0 { return Some(Ordering::Less); }
-        if diff_n > 0 { return Some(Ordering::Greater); }
-        Some(Ordering::Equal)
+        Some(self.cmp(other))
     }
 }
 
@@ -112,7 +109,7 @@ impl ops::BitXor<i32> for Rational {
 
 
 
-#[derive(Clone, Eq, Ord, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Exponential {
     b: Scalar, e: Rational
 }
@@ -123,26 +120,24 @@ impl From<Scalar> for Exponential {
     }
 }
 
+impl Ord for Exponential {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match self.b.cmp(&other.b) {
+            Ordering:: Equal => self.e.cmp(&other.e),
+            order => order
+        }
+    }
+}
+impl PartialOrd for Exponential {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 impl fmt::Display for Exponential {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.e == ONE { Scalar::fmt(&self.b, f) }
         else { f.write_fmt(format_args!("({}^{})", self.b, self.e)) }
-    }
-}
-
-impl PartialEq<Self> for Exponential {
-    fn eq(&self, other: &Self) -> bool {
-        (self.b == other.b) && (self.e == other.e)
-    }
-}
-
-impl PartialOrd for Exponential {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        let (Exponential { b: lb, e: le },
-             Exponential { b: rb, e: re }) = (self, other);
-        let b_order = lb.partial_cmp(rb);
-        if b_order == Some(Ordering::Equal) { le.partial_cmp(re) }
-        else { b_order }
     }
 }
 
@@ -423,9 +418,10 @@ impl ops::Add for ExprCost {
 
 impl PartialOrd for ExprCost {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        let v_order = self.v.cmp(&other.v);
-        if v_order == Ordering::Equal { Some(self.c.cmp(&other.c)) }
-        else { Some(v_order) }
+        match self.v.cmp(&other.v) {
+            Ordering::Equal => Some(self.c.cmp(&other.c)),
+            x => Some(x)
+        }
     }
 }
 
@@ -582,7 +578,6 @@ const RULES: [fn(&Scalar) -> Vec<Scalar>; 3] = [
                             }
 
                             let mut new_factors: Vec<Exponential> = factors.clone();
-
                         }
                     }
                 }
@@ -609,7 +604,7 @@ struct Simplifier {
 
 impl Simplifier {
     fn discover(&mut self, expr: Scalar) {
-        //println!("{}", expr);    // TEST
+        //println!("{expr}");    // TEST
 
         if !self.territory.contains(&expr) {
             let expr_cost = expr.cost();
@@ -622,6 +617,7 @@ impl Simplifier {
     }
 
     fn derive(expr: &Scalar) -> Vec<Scalar> {
+        //println!("{expr}");    // TEST
         let mut transformed: Vec<Scalar> = Vec::new();
         for rule in &RULES {
             transformed.append(&mut (*rule)(expr));
