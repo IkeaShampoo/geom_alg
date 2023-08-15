@@ -609,7 +609,7 @@ struct Simplifier {
 
 impl Simplifier {
     fn discover(&mut self, expr: Scalar) {
-        println!("{}", expr);    // TEST
+        //println!("{}", expr);    // TEST
 
         if !self.territory.contains(&expr) {
             let expr_cost = expr.cost();

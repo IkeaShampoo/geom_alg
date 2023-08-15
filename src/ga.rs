@@ -13,7 +13,7 @@ pub struct CBVec {
 }
 
 /// Product of canonical basis vectors and scalars
-#[derive(Clone)]
+#[derive(Clone, Eq, Ord)]
 pub struct KBlade {
     /// Normalized form
     n: Vec<CBVec>,
@@ -75,6 +75,20 @@ impl PartialOrd<Self> for CBVec {
     }
 }
 
+impl PartialEq for KBlade {
+    fn eq(&self, other: &Self) -> bool {
+        self.n.eq(&other.n)
+    }
+}
+impl PartialOrd for KBlade {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        match self.n.len().cmp(&other.n.len()) {
+            Ordering::Equal => self.n.partial_cmp(&other.n),
+            x => Some(x)
+        }
+    }
+}
+
 
 
 impl ops::Add for MVec {
@@ -84,7 +98,7 @@ impl ops::Add for MVec {
         let mut rhs: VecDeque<KBlade> = VecDeque::from(rhs.blades);
         let mut new_blades: Vec<KBlade> = Vec::with_capacity(lhs.len() + rhs.len());
         while let (Some(lhs_next), Some(rhs_next)) = (lhs.front(), rhs.front()) {
-            match lhs_next.n.cmp(&rhs_next.n) {
+            match lhs_next.cmp(&rhs_next) {
                 Ordering::Less => new_blades.push(lhs.pop_front().unwrap()),
                 Ordering::Equal => {
                     let (lhs_next, rhs_next) = (lhs.pop_front().unwrap(), rhs.pop_front().unwrap());
@@ -129,7 +143,7 @@ impl ops::Mul for KBlade {
         }
         new_normal.append(&mut Vec::from(lhs));
         new_normal.append(&mut Vec::from(rhs));
-        if sign_changes >> 1 == 1 {
+        if sign_changes & 1 == 1 {
             coefficient = coefficient * Scalar::Rational(-ONE);
         }
         KBlade { n: new_normal, c: coefficient }
@@ -283,7 +297,7 @@ impl KVec {
     pub fn rename(self, name: &String) -> Self {
         KVec { v: self.v.rename(name), k: self.k }
     }
-    pub fn with_name(name: &String, basis: KBlade, grade: usize) -> Self {
+    pub fn with_name(name: &String, basis: &KBlade, grade: usize) -> Self {
         let dimensions = basis.grade();
         if grade == 0 {
             KVec { v: MVec::from(KBlade::from(Scalar::from(name.clone()))), k: 0 }
@@ -323,6 +337,9 @@ impl KVec {
             KVec { v: MVec { blades }, k: grade }
         }
     }
+    pub fn reverse_mul_order(self) -> Self {
+        KVec { v: self.v.reverse_mul_order(), k: self.k }
+    }
 }
 
 impl MVec {
@@ -355,9 +372,8 @@ impl MVec {
         }
         renamed
     }
-    pub fn with_name(name: &String, basis: KBlade, grade: usize) -> Self {
+    pub fn with_name(name: &String, basis: &KBlade, grade: usize) -> Self {
         let dimensions = basis.grade();
-        let mut vectors: Vec<MVec> = Vec::with_capacity(grade);
         let template_vector: MVec = {
             let mut new_blades: Vec<KBlade> = Vec::with_capacity(dimensions);
             for i in 0..dimensions {
@@ -365,10 +381,27 @@ impl MVec {
             }
             MVec { blades: new_blades }
         };
-        for i in 0..grade {
-            vectors.push(template_vector.clone().rename(&(i.to_string() + "_")));
+        merge_all((0..grade)
+                      .map(|i| template_vector.clone().rename(&(i.to_string() + "_")))
+                      .collect(),
+                  |a, b| a * b, &MVec { blades: Vec::new() }).rename(name)
+    }
+    pub fn reverse_mul_order(mut self) -> Self {
+        for blade in &mut self.blades {
+            if {
+                // sign changes =
+                // sum_{i = 0}^{n - 1} {n - (i + 1)} =
+                // n*n - sum_{i = 1}^{n} {i} =
+                // n*n - n(n + 1) / 2 =
+                // n(n-1)/2
+                let k = blade.grade();
+                if k == 0 { false }
+                else { (k * (k - 1)) & 2 != 0 }
+            } {
+                blade.c *= Scalar::Rational(-ONE);
+            }
         }
-        merge_all(vectors, |a, b| a * b, &MVec { blades: Vec::new() }).rename(name)
+        self
     }
 }
 
