@@ -48,7 +48,10 @@ impl From<Scalar> for KBlade {
 }
 impl From<KBlade> for MVec {
     fn from(b: KBlade) -> Self {
-        MVec { blades: vec![b] }
+        MVec { blades: match b.c {
+            S_ZERO => Vec::new(),
+            _ => vec![b]
+        }}
     }
 }
 impl From<KBlade> for KVec {
@@ -143,7 +146,7 @@ impl ops::Mul for KBlade {
                 Ordering::Equal => {
                     sign_changes += lhs.len() - 1;
                     coefficient = coefficient * lhs.pop_front().unwrap().square;
-                    new_normal.push(rhs.pop_front().unwrap());
+                    rhs.pop_front();
                 }
                 Ordering::Greater => {
                     sign_changes += lhs.len();
@@ -204,6 +207,7 @@ impl ops::Mul for MVec {
         for lhs_blade in &lhs.blades { for rhs_blade in &rhs.blades {
             unsorted_blades.push(MVec::from(lhs_blade.clone() * rhs_blade.clone()));
         }}
+        //println!("{:#?}", unsorted_blades);
         merge_all(unsorted_blades, |a, b| a + b, &MVec::from(KBlade::from(S_ZERO)))
     }
 }
@@ -413,13 +417,25 @@ impl fmt::Display for CBVec {
         f.write_fmt(format_args!("e{}", self.id))
     }
 }
+impl fmt::Debug for CBVec {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(self, f)
+    }
+}
 impl fmt::Display for KBlade {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.c.fmt(f)?;
+        if self.c != S_ONE {
+            self.c.fmt(f)?;
+        }
         for basis_vec in &self.n {
             basis_vec.fmt(f)?;
         }
         Ok(())
+    }
+}
+impl fmt::Debug for KBlade {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(self, f)
     }
 }
 impl fmt::Display for MVec {
@@ -431,8 +447,18 @@ impl fmt::Display for MVec {
         Ok(())
     }
 }
+impl fmt::Debug for MVec {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(self, f)
+    }
+}
 impl fmt::Display for KVec {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.v.fmt(f)
+    }
+}
+impl fmt::Debug for KVec {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(self, f)
     }
 }

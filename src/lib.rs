@@ -59,9 +59,9 @@ mod tests {
         let dimensions: usize = 3;
         let basis = merge_all(
             (1..=dimensions)
-                .map(|i| KBlade::from(CBVec { id: i as i32, square: S_ONE.clone() }))
+                .map(|i| KBlade::from(CBVec { id: i as i32, square: S_ONE }))
                 .collect(),
-            |a, b| a * b, &KBlade::from(S_ONE.clone()));
+            |a, b| a * b, &KBlade::from(S_ONE));
         println!("{basis}");
         let r = MVec::with_name(&String::from("r"), &basis, 2);
         let r_inv = r.clone().reverse_mul_order();
@@ -69,9 +69,12 @@ mod tests {
         println!("r reversed: {r_inv}");
         let x = MVec::from(KVec::with_name(&String::from("x"), &basis, 1));
         println!("x: {x}");
+        println!("x + 0: {}", x.clone() + MVec::from(KBlade::from(S_ZERO)));
         let rx = r * x;
         println!("rx, {} blades: {rx}", rx.num_blades());
-        let x_rot = rx * r_inv;
+        let mut x_rot = rx * r_inv;
+        let last_blade_idx = x_rot.num_blades() - 1;
+        //*x_rot.coefficient_at_mut(last_blade_idx) = x_rot.coefficient_at(last_blade_idx).simplified();
         println!("x rotated, {} blades: {x_rot}", x_rot.num_blades());
         println!("rotor_test runtime: {watch} nanoseconds");
     }

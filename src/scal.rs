@@ -143,7 +143,7 @@ impl fmt::Display for Exponential {
 
 
 
-#[derive(Clone, PartialEq, PartialOrd, Eq, Ord, Debug)]
+#[derive(Clone, PartialEq, PartialOrd, Eq, Ord)]
 pub enum Scalar {
     Variable(String),
     Rational(Rational),
@@ -390,6 +390,12 @@ impl fmt::Display for Scalar {
     }
 }
 
+impl fmt::Debug for Scalar {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(self, f)
+    }
+}
+
 
 
 #[derive(Copy, Clone, PartialEq)]
@@ -511,6 +517,7 @@ const RULES: [fn(&Scalar) -> Vec<Scalar>; 3] = [
             for index1 in 0..factors.len() {
                 for index2 in 0..factors.len() {
                     // Combination of rational-based exponentials
+                    /*
                     if let (Exponential { b: Scalar::Rational(b1), e: e1 },
                             Exponential { b: Scalar::Rational(b2), e: e2 }) =
                            (&factors[index1], &factors[index2]) {
@@ -525,35 +532,38 @@ const RULES: [fn(&Scalar) -> Vec<Scalar>; 3] = [
                                                (Scalar::Rational(b1 * (b2 ^ e_ratio.n)) ^ e1));
                         }
                     }
+
+                     */
                     // Distribution
-                    else if let Scalar::Sum(_) = &(factors[index2].b) {
+                    if let Scalar::Sum(_) = &(factors[index2].b) {
                         fn distribute(distributions: &mut Vec<Scalar>, other_factors: Scalar,
-                                      terms: Vec<Scalar>, distributed: Scalar) {
+                                      terms: Vec<Scalar>, terms_exp: Rational,
+                                      distributed: Scalar) {
                             for i in 0..terms.len() {
                                 let mut other_terms = terms.clone();
                                 let term = other_terms.remove(i);
-                                distributions.push(other_factors.clone() * (
+                                distributions.push(other_factors.clone() * ((
                                     distributed.clone() * term +
                                     distributed.clone() * Scalar::Sum(other_terms).correct_form()
-                                ));
+                                ) ^ terms_exp));
                             }
                         }
 
                         // distribute factor into another factor
                         if factors[index1].e == factors[index2].e && index1 != index2 {
                             let mut other_factors: Vec<Exponential> = factors.clone();
-                            let distributed: Scalar = other_factors.remove(index1).b;
-                            let terms: Vec<Scalar> = match other_factors.remove(
+                            let distributed: Scalar = Scalar::from(other_factors.remove(index1));
+                            let (terms, terms_exp) = match other_factors.remove(
                                 if index2 < index1 { index2 }
                                 else { index2 - 1 }
-                            ).b {
-                                Scalar::Sum(terms) => terms,
+                            ) {
+                                Exponential { b: Scalar::Sum(terms), e: exp} => (terms, exp),
                                 not_a_sum => panic!("{not_a_sum} is not a sum")
                             };
 
                             distribute(&mut distributions,
                                        Scalar::Product(other_factors).correct_form(),
-                                       terms, distributed);
+                                       terms, terms_exp, distributed);
                         }
 
                         // distribute factor into itself
@@ -604,11 +614,11 @@ struct Simplifier {
 
 impl Simplifier {
     fn discover(&mut self, expr: Scalar) {
-        //println!("{expr}");    // TEST
-
+        //eprintln!("{expr}");    // TEST
         if !self.territory.contains(&expr) {
             let expr_cost = expr.cost();
-            if expr_cost < self.simplest.1 {
+            let &(_, simplest_cost) = &self.simplest;
+            if expr_cost < simplest_cost {
                 self.simplest = (expr.clone(), expr_cost)
             }
             self.territory.insert(expr.clone());
@@ -624,8 +634,8 @@ impl Simplifier {
         }
         match expr {
             Scalar::Sum(terms) => {
-                for i in 0..terms.len() {
-                    for trans_term in Simplifier::derive(&terms[i]) {
+                for (i, term) in terms.iter().enumerate() {
+                    for trans_term in Simplifier::derive(term) {
                         let mut new_terms: Vec<Scalar> = terms.clone();
                         new_terms.remove(i);
                         transformed.push(Scalar::Sum(new_terms).correct_form() + trans_term);
@@ -633,12 +643,12 @@ impl Simplifier {
                 }
             }
             Scalar::Product(factors) => {
-                for i in 0..factors.len() {
-                    for trans_factor in Simplifier::derive(&factors[i].b) {
+                for (i, factor) in factors.iter().enumerate() {
+                    for trans_factor in Simplifier::derive(&factor.b) {
                         let mut new_factors: Vec<Exponential> = factors.clone();
                         new_factors.remove(i);
                         transformed.push(Scalar::Product(new_factors).correct_form() *
-                                         (trans_factor ^ factors[i].e));
+                                         (trans_factor ^ factor.e));
                     }
                 }
             }
@@ -671,45 +681,27 @@ impl Scalar {
         self ^ -ONE
     }
 
-    fn replace(self, to_replace: &Scalar, replace_with: &Scalar) -> Scalar {
+    fn replace(self, to_replace: &String, replace_with: &Scalar) -> Scalar {
         match self {
-            Scalar::Sum(terms) => {
-                let mut new_terms: Vec<Scalar> = Vec::with_capacity(terms.len());
-                for term in terms {
-                    new_terms.push(term.replace(to_replace, replace_with));
-                }
-                add_all(new_terms)
-            }
-            Scalar::Product(factors) => {
-                let mut new_factors: Vec<Scalar> = Vec::with_capacity(factors.len());
-                for Exponential { b: factor_base, e: factor_exp } in factors {
-                    new_factors.push(factor_base.replace(to_replace, replace_with) ^ factor_exp);
-                }
-                mul_all(new_factors)
-            }
-            x => {
+            Scalar::Sum(terms) => add_all(terms.into_iter()
+                .map(|term| term.replace(to_replace, replace_with)).collect()),
+            Scalar::Product(factors) => mul_all(factors.into_iter()
+                .map(|Exponential { b: factor_base, e: factor_exp }|
+                    factor_base.replace(to_replace, replace_with) ^ factor_exp).collect()),
+            Scalar::Variable(x) =>
                 if x == *to_replace { replace_with.clone() }
-                else { x }
-            }
+                else { Scalar::Variable(x) },
+            x => x
         }
     }
 
     fn replace_all(self, replacements: &BTreeMap<String, &Scalar>) -> Scalar {
         match self {
-            Scalar::Sum(terms) => {
-                let mut new_terms: Vec<Scalar> = Vec::with_capacity(terms.len());
-                for term in terms {
-                    new_terms.push(term.replace_all(replacements));
-                }
-                add_all(new_terms)
-            }
-            Scalar::Product(factors) => {
-                let mut new_factors: Vec<Scalar> = Vec::with_capacity(factors.len());
-                for Exponential { b: factor_base, e: factor_exp } in factors {
-                    new_factors.push(factor_base.replace_all(replacements) ^ factor_exp);
-                }
-                mul_all(new_factors)
-            }
+            Scalar::Sum(terms) => add_all(terms.into_iter()
+                .map(|term| term.replace_all(replacements)).collect()),
+            Scalar::Product(factors) => mul_all(factors.into_iter()
+                .map(|Exponential { b: factor_base, e: factor_exp }|
+                    factor_base.replace_all(replacements) ^ factor_exp).collect()),
             Scalar::Variable(x) => match replacements.get(&x) {
                 Some(replacement) => (*replacement).clone(),
                 None => Scalar::Variable(x)
@@ -796,6 +788,7 @@ impl Scalar {
 
         simplifier.discover(self.clone());
         while let Some(next_expr) = simplifier.queue.pop() {
+            //eprintln!("Queue size: {}", simplifier.queue.len());
             for derived in Simplifier::derive(&next_expr) {
                 simplifier.discover(derived);
             }
