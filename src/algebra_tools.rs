@@ -13,12 +13,14 @@ pub fn choose(n: usize, k: usize) -> usize {
 
 pub fn exponentiate<T: ops::Mul<Output = T> + Copy>(identity: T, base: T, exp: u32) -> T {
     let mut product = identity;
-    let mut base_to_i = identity;
-    for i in 0..u32::BITS {
-        if ((exp >> i) & 1) == 1 {
-            product = product * base_to_i;
+    let mut base_raised = base;
+    let mut shifted_exp = exp;
+    while shifted_exp != 0 { // for i in 0..u32::BITS
+        if (shifted_exp & 1) == 1 { // ith binary digit of exp is 1
+            product = product * base_raised;
         }
-        base_to_i = base_to_i * base;
+        base_raised = base_raised * base_raised; // base ^ (2 ^ i)
+        shifted_exp >>= 1;
     }
     product
 }

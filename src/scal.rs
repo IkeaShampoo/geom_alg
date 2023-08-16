@@ -517,11 +517,11 @@ const RULES: [fn(&Scalar) -> Vec<Scalar>; 3] = [
             for index1 in 0..factors.len() {
                 for index2 in 0..factors.len() {
                     // Combination of rational-based exponentials
-                    /*
                     if let (Exponential { b: Scalar::Rational(b1), e: e1 },
                             Exponential { b: Scalar::Rational(b2), e: e2 }) =
                            (&factors[index1], &factors[index2]) {
                         let e_ratio = *e2 / *e1;
+                        // e2 = e1 * e_ratio
                         if index1 != index2 && e_ratio.d == 1 {
                             let (b1, b2) = (*b1, *b2);
                             let e1 = *e1;
@@ -532,10 +532,8 @@ const RULES: [fn(&Scalar) -> Vec<Scalar>; 3] = [
                                                (Scalar::Rational(b1 * (b2 ^ e_ratio.n)) ^ e1));
                         }
                     }
-
-                     */
                     // Distribution
-                    if let Scalar::Sum(_) = &(factors[index2].b) {
+                    else if let Scalar::Sum(_) = &(factors[index2].b) {
                         fn distribute(distributions: &mut Vec<Scalar>, other_factors: Scalar,
                                       terms: Vec<Scalar>, terms_exp: Rational,
                                       distributed: Scalar) {
@@ -614,8 +612,9 @@ struct Simplifier {
 
 impl Simplifier {
     fn discover(&mut self, expr: Scalar) {
-        //eprintln!("{expr}");    // TEST
+        //eprintln!("{expr}");
         if !self.territory.contains(&expr) {
+            //eprintln!("{expr}");
             let expr_cost = expr.cost();
             let &(_, simplest_cost) = &self.simplest;
             if expr_cost < simplest_cost {
@@ -627,7 +626,7 @@ impl Simplifier {
     }
 
     fn derive(expr: &Scalar) -> Vec<Scalar> {
-        //println!("{expr}");    // TEST
+        //println!("{expr}");
         let mut transformed: Vec<Scalar> = Vec::new();
         for rule in &RULES {
             transformed.append(&mut (*rule)(expr));

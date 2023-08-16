@@ -41,7 +41,12 @@ mod tests {
     }
 
     #[test]
-    fn ez_factorization_test() {
+    fn factorization_test() {
+        // PROBLEM CHILD:
+        //(r1 * ((r2 * x3) + (r3 * x2 * -1) + (r4 * x1)))
+        //+ (r2 * -1 * ((r1 * x3) + (r3 * x1 * -1) + (r4 * x2 * -1)))
+        //+ (r3 * (-1^2) * ((r1 * x2) + (r2 * x1 * -1) + (r4 * x3)))
+        //+ (r4 * -1 * ((r1 * x1) + (r2 * x2) + (r3 * x3)))
         let watch = Stopwatch::new_running();
         let a = Scalar::from("a");
         let b = Scalar::from("b");
@@ -50,7 +55,7 @@ mod tests {
         let ab_ac_ad = a.clone() * b.clone() + a.clone() * c.clone() + a.clone() * d.clone();
         let a_bcd = a.clone() * (b.clone() + c.clone() + d.clone());
         assert_eq!(ab_ac_ad.simplified().to_string(), a_bcd.to_string());
-        println!("ez_factorization_test runtime: {watch} nanoseconds");
+        println!("factorization_test runtime: {watch} nanoseconds");
     }
 
     #[test]
