@@ -279,7 +279,7 @@ impl ops::Mul for Scalar {
                             let exp = lhs_next.e + rhs_next.e;
                             let base = rhs.pop_front().expect(EXPECT_ERR).b;
                             lhs.pop_front();
-                            if exp != ZERO {
+                            if base != -ONE && exp != ZERO {
                                 new_factors.push(Exponential { b: base, e: exp });
                             }
                         }
@@ -607,21 +607,24 @@ const RULES: [fn(&Scalar) -> Vec<Scalar>; 3] = [
 struct Simplifier {
     simplest: (Scalar, ExprCost),
     territory: BTreeSet<Scalar>,
-    queue: Vec<Scalar>
+    queue: Vec<Scalar>,
+    count: usize
 }
 
 impl Simplifier {
     fn discover(&mut self, expr: Scalar) {
         //eprintln!("{expr}");
         if !self.territory.contains(&expr) {
-            //eprintln!("{expr}");
+            if self.count - ((self.count >> 12) << 12) == 0 { eprintln!("{expr}"); }
             let expr_cost = expr.cost();
             let &(_, simplest_cost) = &self.simplest;
             if expr_cost < simplest_cost {
+                //eprintln!("{expr}");
                 self.simplest = (expr.clone(), expr_cost)
             }
             self.territory.insert(expr.clone());
             self.queue.push(expr);
+            self.count += 1;
         }
     }
 
@@ -782,7 +785,8 @@ impl Scalar {
         let mut simplifier = Simplifier {
             simplest: (self.clone(), self.cost()),
             territory: BTreeSet::new(),
-            queue: Vec::new()
+            queue: Vec::new(),
+            count: 0
         };
 
         simplifier.discover(self.clone());
@@ -792,6 +796,7 @@ impl Scalar {
                 simplifier.discover(derived);
             }
         }
+        eprintln!("{}", simplifier.count);
         let (simplest, _) = simplifier.simplest;
         simplest
     }
