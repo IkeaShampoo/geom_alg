@@ -1,5 +1,5 @@
-mod scal;
-mod ga;
+pub mod scal;
+pub mod ga;
 mod algebra_tools;
 mod benchmarking;
 
@@ -61,21 +61,22 @@ mod tests {
         //+ (r3 * (-1^2) * ((r1 * x2) + (r2 * x1 * -1) + (r4 * x3)))
         //+ (r4 * -1 * ((r1 * x1) + (r2 * x2) + (r3 * x3)))
         let watch = Stopwatch::new_running();
-        let (a, b, c, d) = (Scalar::from("a"), Scalar::from("b"), Scalar::from("c"), Scalar::from("d"));
+        let (a, b, c, d) = (Scalar::from("a"), Scalar::from("b"), 
+                            Scalar::from("c"), Scalar::from("d"));
         let (x, y, z) = (Scalar::from("e"), Scalar::from("f"), Scalar::from("g"));
         let prod1 = a.clone() * ((b.clone() * z.clone()) + 
-                                 (c.clone() * y.clone() * -S_ONE) + 
+                                 (c.clone() * y.clone() * -Scalar::ONE) + 
                                  (d.clone() * x.clone()));
         println!("\nPROD1: {}", prod1.simplified());
         let prod2 = b.clone() * ((a.clone() * z.clone()) + 
-                                 (c.clone() * x.clone() * -S_ONE) + 
-                                 (d.clone() * y.clone() * -S_ONE)) * -S_ONE;
+                                 (c.clone() * x.clone() * -Scalar::ONE) + 
+                                 (d.clone() * y.clone() * -Scalar::ONE)) * -Scalar::ONE;
         println!("\nPROD2: {}", prod2.simplified());
-        let prod3 = c.clone() * ((a.clone() * y.clone() * ((-S_ONE) ^ Rational::from(2))) + 
-                                 (b.clone() * x.clone() * -S_ONE) + 
+        let prod3 = c.clone() * ((a.clone() * y.clone() * ((-Scalar::ONE) ^ Rational::from(2))) + 
+                                 (b.clone() * x.clone() * -Scalar::ONE) + 
                                  (d.clone() * z.clone()));
         println!("\nPROD3: {}", prod3.simplified());
-        let prod4 = d.clone() * ((a * x) + (b * y) + (c * z)) * -S_ONE;
+        let prod4 = d.clone() * ((a * x) + (b * y) + (c * z)) * -Scalar::ONE;
         println!("\nPROD4: {}", prod4.simplified());
 
         let all = (((prod1 + prod2).simplified() + prod3).simplified() + prod4).simplified();
@@ -90,11 +91,9 @@ mod tests {
     fn rotor_test() {
         let watch = Stopwatch::new_running();
         let dimensions: usize = 3;
-        let basis = merge_all(
-            (1..=dimensions)
-                .map(|i| KBlade::from(CBVec { id: i as i32, square: S_ONE }))
-                .collect(),
-            |a, b| a * b, &KBlade::from(S_ONE));
+        let basis = merge_all(dimensions, (1..=dimensions)
+                .map(|i| KBlade::from(CBVec { id: i as i32, square: Scalar::ONE })),
+            |a, b| a * b, &KBlade::ONE);
         println!("{basis}");
         let r = MVec::with_name(&String::from("r"), &basis, 2);
         let r_inv = r.clone().reverse_mul_order();
@@ -102,7 +101,7 @@ mod tests {
         println!("r reversed: {r_inv}");
         let x = MVec::from(KVec::with_name(&String::from("x"), &basis, 1));
         println!("x: {x}");
-        println!("x + 0: {}", x.clone() + MVec::from(KBlade::from(S_ZERO)));
+        println!("x + 0: {}", x.clone() + MVec::ZERO);
         let rx = r * x;
         println!("rx, {} blades: {rx}", rx.num_blades());
         let mut x_rot = rx * r_inv;

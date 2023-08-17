@@ -25,17 +25,26 @@ pub fn exponentiate<T: ops::Mul<Output = T> + Copy>(identity: T, base: T, exp: u
     product
 }
 
-fn merge_rec<T: Clone>(arguments: &mut Vec<T>, size: usize,
-                       merge_func: fn(T, T) -> T, identity: &T) -> T {
+// linearly-complex implementation of merge
+fn merge_linear<T: Clone>(arguments: Vec<T>, merge_func: fn(T, T) -> T, identity: &T) -> T {
+    let mut result = identity.clone();
+    for arg in arguments {
+        result = merge_func(result, arg);
+    }
+    result
+} 
+
+// logarithmically-complex implementation of merge
+pub fn merge_all_rec<T: Clone>(size: usize, arguments: &mut dyn Iterator<Item = T>,
+                           merge_func: fn(T, T) -> T, identity: &T) -> T {
     if size > 2 {
-        let right_size = size / 2;
-        let rhs = merge_rec(arguments, right_size, merge_func, identity);
-        let lhs = merge_rec(arguments, size - right_size, merge_func, identity);
-        merge_func(lhs, rhs)
+        let left_size = size / 2;
+        merge_func(merge_all_rec(left_size, arguments, merge_func, identity), 
+                   merge_all_rec(size - left_size, arguments, merge_func, identity))
     }
     else {
-        match (arguments.pop(), arguments.pop()) {
-            (Some(rhs), Some(lhs)) => merge_func(lhs, rhs),
+        match (arguments.next(), arguments.next()) {
+            (Some(lhs), Some(rhs)) => merge_func(lhs, rhs),
             (Some(x), None) | (None, Some(x)) => x,
             (None, None) => identity.clone()
         }
@@ -44,7 +53,13 @@ fn merge_rec<T: Clone>(arguments: &mut Vec<T>, size: usize,
 
 /// Merges all arguments into one, preserving their initial ordering.
 /// May differ from merge_func(arg1, merge_func(arg2, ...)) if merge_func isn't associative.
-pub fn merge_all<T: Clone>(arguments: Vec<T>, merge_func: fn(T, T) -> T, identity: &T) -> T {
-    let init_size = arguments.len();
-    merge_rec(&mut {arguments}, init_size, merge_func, identity)
+#[inline(always)]
+pub fn merge_all<T: Clone>(size: usize, arguments: impl Iterator<Item = T>, 
+                           merge_func: fn(T, T) -> T, identity: &T) -> T {
+    merge_all_rec(size, &mut {arguments}, merge_func, identity)
+}
+#[inline(always)]
+pub fn merge_vec<T: Clone>(arguments: Vec<T>, merge_func: fn(T, T) -> T, identity: &T) -> T {
+    merge_all_rec(arguments.len(), &mut arguments.into_iter(), merge_func, identity)
+    //merge_linear(arguments, merge_func, identity)
 }
