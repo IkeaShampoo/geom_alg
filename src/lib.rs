@@ -106,7 +106,6 @@ mod tests {
         println!("rx, {} blades: {rx}", rx.num_blades());
         let mut x_rot = rx * r_inv;
         let last_blade_idx = x_rot.num_blades() - 1;
-        //*x_rot.coefficient_at_mut(last_blade_idx) = x_rot.coefficient_at(last_blade_idx).simplified();
         println!("x rotated, {} blades: {x_rot}", x_rot.num_blades());
         println!("rotor_test runtime: {watch} nanoseconds");
     }

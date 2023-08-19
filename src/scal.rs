@@ -404,76 +404,9 @@ impl fmt::Display for Scalar {
         }
     }
 }
-
 impl fmt::Debug for Scalar {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(self, f)
-    }
-}
-
-
-
-#[derive(Copy, Clone, PartialEq)]
-struct ExprCost {
-    c: usize,       // Constant cost
-    v: usize        // Variable cost
-}
-impl ExprCost {
-    const ZERO: ExprCost = ExprCost { c: 0, v: 0};
-
-    fn new(ops_count: usize, is_constant: bool) -> ExprCost {
-        if is_constant { ExprCost { c: ops_count, v: 0 }}
-        else { ExprCost { v: ops_count, c: 0 } }
-    }
-}
-impl PartialOrd for ExprCost {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        match self.v.cmp(&other.v) {
-            Ordering::Equal => Some(self.c.cmp(&other.c)),
-            x => Some(x)
-        }
-    }
-}
-impl ops::Add for ExprCost {
-    type Output = Self;
-    fn add(self, rhs: Self) -> Self::Output {
-        ExprCost { c: self.c + rhs.c, v: self.v + rhs.v}
-    }
-}
-
-#[derive(Copy, Clone, PartialEq)]
-struct ExprComplexity {
-    num_terms: usize,
-    num_factors: usize
-}
-impl ExprComplexity {
-    const ZERO: ExprComplexity = ExprComplexity { num_terms: 0, num_factors: 0 };
-    const ONE: ExprComplexity = ExprComplexity { num_terms: 1, num_factors: 0 };
-}
-impl PartialOrd for ExprComplexity {
-    fn partial_cmp(&self, rhs: &Self) -> Option<Ordering> {
-        match self.num_terms.cmp(&rhs.num_terms) {
-            Ordering::Equal => self.num_factors.partial_cmp(&rhs.num_factors),
-            x => Some(x)
-        }
-    }
-}
-impl ops::Add for ExprComplexity {
-    type Output = Self;
-    fn add(self, rhs: Self) -> Self::Output {
-        ExprComplexity { 
-            num_terms: self.num_terms + rhs.num_terms, 
-            num_factors: self.num_factors + rhs.num_factors
-        }
-    }
-}
-impl ops::Mul for ExprComplexity {
-    type Output = Self;
-    fn mul(self, rhs: Self) -> Self::Output {
-        ExprComplexity {
-            num_terms: self.num_terms * rhs.num_terms,
-            num_factors: self.num_factors + rhs.num_factors
-        }
     }
 }
 
@@ -652,12 +585,85 @@ const RULES: [fn(&Scalar) -> Vec<Scalar>; 3] = [
     }
 ];
 
+
+
+#[derive(Copy, Clone, PartialEq)]
+struct ExprCost {
+    c: usize,       // Constant cost
+    v: usize        // Variable cost
+}
+impl ExprCost {
+    const ZERO: ExprCost = ExprCost { c: 0, v: 0};
+
+    fn new(ops_count: usize, is_constant: bool) -> ExprCost {
+        if is_constant { ExprCost { c: ops_count, v: 0 }}
+        else { ExprCost { v: ops_count, c: 0 } }
+    }
+}
+impl PartialOrd for ExprCost {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        match self.v.cmp(&other.v) {
+            Ordering::Equal => Some(self.c.cmp(&other.c)),
+            x => Some(x)
+        }
+    }
+}
+impl ops::Add for ExprCost {
+    type Output = Self;
+    fn add(self, rhs: Self) -> Self::Output {
+        ExprCost { c: self.c + rhs.c, v: self.v + rhs.v}
+    }
+}
+
+#[derive(Copy, Clone, PartialEq)]
+struct ExprComplexity {
+    num_terms: usize,
+    num_factors: usize
+}
+impl ExprComplexity {
+    const ADD_IDENTITY: ExprComplexity = ExprComplexity { num_terms: 0, num_factors: 0 };
+    const MUL_IDENTITY: ExprComplexity = ExprComplexity { num_terms: 1, num_factors: 0 };
+}
+impl PartialOrd for ExprComplexity {
+    fn partial_cmp(&self, rhs: &Self) -> Option<Ordering> {
+        match self.num_terms.cmp(&rhs.num_terms) {
+            Ordering::Equal => self.num_factors.partial_cmp(&rhs.num_factors),
+            x => Some(x)
+        }
+    }
+}
+impl ops::Add for ExprComplexity {
+    type Output = Self;
+    fn add(self, rhs: Self) -> Self::Output {
+        ExprComplexity { 
+            num_terms: self.num_terms + rhs.num_terms, 
+            num_factors: self.num_factors + rhs.num_factors
+        }
+    }
+}
+impl ops::Mul for ExprComplexity {
+    type Output = Self;
+    fn mul(self, rhs: Self) -> Self::Output {
+        ExprComplexity {
+            num_terms: self.num_terms * rhs.num_terms,
+            num_factors: self.num_terms * rhs.num_factors + rhs.num_terms * self.num_factors
+        }
+    }
+}
+impl fmt::Display for ExprComplexity {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_fmt(format_args!("Terms: {}, Factors: {}", self.num_terms, self.num_factors))
+    }
+}
+
+
+
 struct Simplifier {
     simplest: (Scalar, ExprCost),
     territory: BTreeSet<Scalar>,
     queue: Vec<Scalar>,
     count: usize,
-    max_terms: usize
+    complexity: ExprComplexity
 }
 
 impl Simplifier {
@@ -667,7 +673,7 @@ impl Simplifier {
             territory: BTreeSet::new(),
             queue: Vec::new(),
             count: 0,
-            max_terms: usize::MAX
+            complexity: expr.complexity()
         };
 
         simplifier.discover(expr.clone());
@@ -686,9 +692,19 @@ impl Simplifier {
         if !self.territory.contains(&expr) {
             //if self.count - ((self.count >> 12) << 12) == 0 { eprintln!("{expr}"); }
             let expr_cost = expr.cost();
+            let expr_complexity = expr.complexity();
+            //eprintln!("Complexity: {expr_complexity}");
             let &(_, simplest_cost) = &self.simplest;
             
-            if expr_cost < simplest_cost {
+            if expr_complexity < self.complexity {
+                eprintln!("New complexity: {}", self.complexity);
+                self.simplest = (expr.clone(), expr_cost);
+                self.territory = BTreeSet::new();
+                self.queue = Vec::new();
+                self.count = 0;
+                self.complexity = expr_complexity;
+            }
+            else if expr_cost < simplest_cost {
                 //eprintln!("{expr}");
                 self.simplest = (expr.clone(), expr_cost)
             }
@@ -831,35 +847,27 @@ impl Scalar {
 
     fn cost(&self) -> ExprCost {
         match self {
-            Scalar::Sum(terms) => {
-                let mut total_cost: ExprCost = ExprCost::ZERO;
-                for term in terms {
-                    total_cost = total_cost + term.cost();
-                }
-                total_cost + ExprCost::new(terms.len() - 1, self.is_constant())
-            }
-            Scalar::Product(factors) => {
-                let mut total_cost: ExprCost = ExprCost::ZERO;
-                for factor in factors {
-                    total_cost = total_cost + factor.b.cost();
-                }
-                total_cost + ExprCost::new(factors.len() - 1, self.is_constant())
-            }
-            _ => ExprCost { c: 0, v: 0}
+            Scalar::Sum(terms) => merge_seq(terms.iter().map(|term| term.cost()),
+                    |a, b| a + b, &ExprCost::ZERO) + 
+                ExprCost::new(terms.len() - 1, self.is_constant()),
+            Scalar::Product(factors) => merge_seq(factors.iter().map(|factor| factor.b.cost()),
+                    |a, b| a + b, &ExprCost::ZERO) + 
+                ExprCost::new(factors.len() - 1, self.is_constant()),
+            _ => ExprCost::ZERO
         }
     }
 
-    // Provides an upper bound on the number of terms of any Scalar::Sum that could possibly be 
-    //  derived from this expression without the addition of any terms that cancel each other out
+    // Provides an upper bound on the complexity of any expression that could be derived from 
+    //  this expression without the addition of new term/factor pairs that cancel each other out
     fn complexity(&self) -> ExprComplexity {
         match self {
             Scalar::Sum(terms) => merge_seq(terms.iter().map(|term| term.complexity()), 
-                |a, b| a + b, &ExprComplexity::ZERO),
+                |a, b| a + b, &ExprComplexity::ADD_IDENTITY),
             Scalar::Product(factors) => merge_seq(factors.iter()
                     .map(|factor| exponentiate(factor.b.complexity(), 
-                        factor.e.round_to_zero().unsigned_abs(), ExprComplexity::ZERO)),
-                |a, b| a * b, &ExprComplexity::ONE),
-            _ => ExprComplexity::ONE
+                        factor.e.round_to_zero().unsigned_abs(), ExprComplexity::MUL_IDENTITY)),
+                |a, b| a * b, &ExprComplexity::MUL_IDENTITY),
+            _ => ExprComplexity { num_terms: 1, num_factors: 1 }
         }
     }
 

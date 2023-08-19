@@ -117,7 +117,7 @@ impl ops::Add for MVec {
                     let (lhs_next, rhs_next) = (lhs.pop_front().unwrap(), rhs.pop_front().unwrap());
                     let new_blade = KBlade {
                         n: lhs_next.n,
-                        c: (lhs_next.c + rhs_next.c)//.simplified()
+                        c: (lhs_next.c + rhs_next.c).simplified()
                     };
                     if new_blade.c != Scalar::ZERO {
                         new_blades.push(new_blade);
