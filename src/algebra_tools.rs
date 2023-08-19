@@ -11,32 +11,26 @@ pub fn choose(n: usize, k: usize) -> usize {
     factorial(n - k + 1, n) / factorial(1, k)
 }
 
-pub fn exponentiate<T: ops::Mul<Output = T> + Copy>(identity: T, base: T, exp: u32) -> T {
+pub fn exponentiate<T: ops::Mul<Output = T> + Copy>(base: T, exp: u32, identity: T) -> T {
     let mut product = identity;
     let mut base_raised = base;
     let mut shifted_exp = exp;
-    while shifted_exp != 0 { // for i in 0..u32::BITS
+    loop { // for i in 0..u32::BITS
         if (shifted_exp & 1) == 1 { // ith binary digit of exp is 1
             product = product * base_raised;
         }
-        base_raised = base_raised * base_raised; // base ^ (2 ^ i)
         shifted_exp >>= 1;
+        if shifted_exp == 0 {
+            break;
+        }
+        base_raised = base_raised * base_raised; // base ^ (2 ^ i)
     }
     product
 }
 
-// linearly-complex implementation of merge
-fn merge_linear<T: Clone>(arguments: Vec<T>, merge_func: fn(T, T) -> T, identity: &T) -> T {
-    let mut result = identity.clone();
-    for arg in arguments {
-        result = merge_func(result, arg);
-    }
-    result
-} 
-
 // logarithmically-complex implementation of merge
 pub fn merge_all_rec<T: Clone>(size: usize, arguments: &mut dyn Iterator<Item = T>,
-                           merge_func: fn(T, T) -> T, identity: &T) -> T {
+                               merge_func: fn(T, T) -> T, identity: &T) -> T {
     if size > 2 {
         let left_size = size / 2;
         merge_func(merge_all_rec(left_size, arguments, merge_func, identity), 
@@ -51,8 +45,21 @@ pub fn merge_all_rec<T: Clone>(size: usize, arguments: &mut dyn Iterator<Item = 
     }
 }
 
+// Linear time complexity implementation
+#[inline(always)]
+pub fn merge_seq<T: Clone>(arguments: impl Iterator<Item = T>, merge_func: fn(T, T) -> T, 
+                           identity: &T) -> T{
+    let mut result = identity.clone();
+    for arg in arguments {
+        result = merge_func(result, arg);
+    }
+    result
+}
+
+/// Logarithmic time complexity implementations
 /// Merges all arguments into one, preserving their initial ordering.
 /// May differ from merge_func(arg1, merge_func(arg2, ...)) if merge_func isn't associative.
+
 #[inline(always)]
 pub fn merge_all<T: Clone>(size: usize, arguments: impl Iterator<Item = T>, 
                            merge_func: fn(T, T) -> T, identity: &T) -> T {
@@ -61,5 +68,5 @@ pub fn merge_all<T: Clone>(size: usize, arguments: impl Iterator<Item = T>,
 #[inline(always)]
 pub fn merge_vec<T: Clone>(arguments: Vec<T>, merge_func: fn(T, T) -> T, identity: &T) -> T {
     merge_all_rec(arguments.len(), &mut arguments.into_iter(), merge_func, identity)
-    //merge_linear(arguments, merge_func, identity)
+    //merge_vec_simple(arguments, merge_func, identity)
 }

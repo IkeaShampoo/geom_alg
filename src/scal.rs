@@ -33,6 +33,25 @@ impl Rational {
     pub fn abs(self) -> Rational {
         Rational { n: self.n.abs(), d: self.d }
     }
+    pub fn floor(self) -> i32 {
+        if self.n.is_positive() || self.n % self.d as i32 == 0 {
+            self.n / self.d as i32
+        }
+        else {
+            (self.n / self.d as i32) - 1
+        }
+    }
+    pub fn ceil(self) -> i32 {
+        if self.n.is_negative() || self.n % self.d as i32 == 0 {
+            self.n / self.d as i32
+        }
+        else {
+            (self.n / self.d as i32) + 1
+        }
+    }
+    pub fn round_to_zero(self) -> i32 {
+        self.n / self.d as i32
+    }
 }
 
 impl From<i32> for Rational {
@@ -100,11 +119,8 @@ impl ops::Div for Rational {
 impl ops::BitXor<i32> for Rational {
     type Output = Self;
     fn bitxor(self, exp: i32) -> Self {
-        let mut base = self;
-        if exp < 0 {
-            base = Rational::ONE / base;
-        }
-        exponentiate(Rational::ONE, base, exp.unsigned_abs())
+        exponentiate(if exp < 0 { Rational::ONE / self } else { self }, 
+                     exp.unsigned_abs(), Rational::ONE)
     }
 }
 
@@ -399,28 +415,17 @@ impl fmt::Debug for Scalar {
 
 #[derive(Copy, Clone, PartialEq)]
 struct ExprCost {
-    c: usize,
-    v: usize
+    c: usize,       // Constant cost
+    v: usize        // Variable cost
 }
-
 impl ExprCost {
-    fn zero() -> ExprCost {
-        ExprCost { c: 0, v: 0}
-    }
+    const ZERO: ExprCost = ExprCost { c: 0, v: 0};
 
     fn new(ops_count: usize, is_constant: bool) -> ExprCost {
         if is_constant { ExprCost { c: ops_count, v: 0 }}
         else { ExprCost { v: ops_count, c: 0 } }
     }
 }
-
-impl ops::Add for ExprCost {
-    type Output = Self;
-    fn add(self, rhs: Self) -> Self::Output {
-        ExprCost { c: self.c + rhs.c, v: self.v + rhs.v}
-    }
-}
-
 impl PartialOrd for ExprCost {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         match self.v.cmp(&other.v) {
@@ -429,6 +434,50 @@ impl PartialOrd for ExprCost {
         }
     }
 }
+impl ops::Add for ExprCost {
+    type Output = Self;
+    fn add(self, rhs: Self) -> Self::Output {
+        ExprCost { c: self.c + rhs.c, v: self.v + rhs.v}
+    }
+}
+
+#[derive(Copy, Clone, PartialEq)]
+struct ExprComplexity {
+    num_terms: usize,
+    num_factors: usize
+}
+impl ExprComplexity {
+    const ZERO: ExprComplexity = ExprComplexity { num_terms: 0, num_factors: 0 };
+    const ONE: ExprComplexity = ExprComplexity { num_terms: 1, num_factors: 0 };
+}
+impl PartialOrd for ExprComplexity {
+    fn partial_cmp(&self, rhs: &Self) -> Option<Ordering> {
+        match self.num_terms.cmp(&rhs.num_terms) {
+            Ordering::Equal => self.num_factors.partial_cmp(&rhs.num_factors),
+            x => Some(x)
+        }
+    }
+}
+impl ops::Add for ExprComplexity {
+    type Output = Self;
+    fn add(self, rhs: Self) -> Self::Output {
+        ExprComplexity { 
+            num_terms: self.num_terms + rhs.num_terms, 
+            num_factors: self.num_factors + rhs.num_factors
+        }
+    }
+}
+impl ops::Mul for ExprComplexity {
+    type Output = Self;
+    fn mul(self, rhs: Self) -> Self::Output {
+        ExprComplexity {
+            num_terms: self.num_terms * rhs.num_terms,
+            num_factors: self.num_factors + rhs.num_factors
+        }
+    }
+}
+
+
 
 const RULES: [fn(&Scalar) -> Vec<Scalar>; 3] = [
     // Factorization
@@ -607,16 +656,38 @@ struct Simplifier {
     simplest: (Scalar, ExprCost),
     territory: BTreeSet<Scalar>,
     queue: Vec<Scalar>,
-    count: usize
+    count: usize,
+    max_terms: usize
 }
 
 impl Simplifier {
+    fn simplify(expr: &Scalar) -> Scalar {
+        let mut simplifier = Simplifier {
+            simplest: (expr.clone(), expr.cost()),
+            territory: BTreeSet::new(),
+            queue: Vec::new(),
+            count: 0,
+            max_terms: usize::MAX
+        };
+
+        simplifier.discover(expr.clone());
+        while let Some(next_expr) = simplifier.queue.pop() {
+            //eprintln!("Queue size: {}", simplifier.queue.len());
+            for derived in Simplifier::derive(&next_expr) {
+                simplifier.discover(derived);
+            }
+        }
+        //eprintln!("{}", simplifier.count);
+        let (simplest, _) = simplifier.simplest;
+        simplest
+    }
     fn discover(&mut self, expr: Scalar) {
         //eprintln!("{expr}");
         if !self.territory.contains(&expr) {
-            if self.count - ((self.count >> 12) << 12) == 0 { eprintln!("{expr}"); }
+            //if self.count - ((self.count >> 12) << 12) == 0 { eprintln!("{expr}"); }
             let expr_cost = expr.cost();
             let &(_, simplest_cost) = &self.simplest;
+            
             if expr_cost < simplest_cost {
                 //eprintln!("{expr}");
                 self.simplest = (expr.clone(), expr_cost)
@@ -671,8 +742,7 @@ fn mul_all(size: usize, factors: impl Iterator<Item = Scalar>) -> Scalar {
 }
 #[inline(always)]
 fn mul_exp(factors: Vec<Exponential>) -> Scalar {
-    merge_all(factors.len(), factors.into_iter().map(|f| Scalar::from(f)), 
-              |x, y| x * y, &Scalar::ONE)
+    mul_all(factors.len(), factors.into_iter().map(|f| Scalar::from(f)))
 }
 
 impl Scalar {
@@ -762,14 +832,14 @@ impl Scalar {
     fn cost(&self) -> ExprCost {
         match self {
             Scalar::Sum(terms) => {
-                let mut total_cost: ExprCost = ExprCost::zero();
+                let mut total_cost: ExprCost = ExprCost::ZERO;
                 for term in terms {
                     total_cost = total_cost + term.cost();
                 }
                 total_cost + ExprCost::new(terms.len() - 1, self.is_constant())
             }
             Scalar::Product(factors) => {
-                let mut total_cost: ExprCost = ExprCost::zero();
+                let mut total_cost: ExprCost = ExprCost::ZERO;
                 for factor in factors {
                     total_cost = total_cost + factor.b.cost();
                 }
@@ -779,34 +849,22 @@ impl Scalar {
         }
     }
 
-    fn total_terms(&self) -> usize {
+    // Provides an upper bound on the number of terms of any Scalar::Sum that could possibly be 
+    //  derived from this expression without the addition of any terms that cancel each other out
+    fn complexity(&self) -> ExprComplexity {
         match self {
-            Scalar::Sum(terms) => {
-                todo!() 
-            }
-            _ => todo!()
+            Scalar::Sum(terms) => merge_seq(terms.iter().map(|term| term.complexity()), 
+                |a, b| a + b, &ExprComplexity::ZERO),
+            Scalar::Product(factors) => merge_seq(factors.iter()
+                    .map(|factor| exponentiate(factor.b.complexity(), 
+                        factor.e.round_to_zero().unsigned_abs(), ExprComplexity::ZERO)),
+                |a, b| a * b, &ExprComplexity::ONE),
+            _ => ExprComplexity::ONE
         }
     }
 
     pub fn simplified(&self) -> Scalar {
         //let amogus = Scalar::Variable(String::from(char::from_u32(0xD9E).unwrap()));
-
-        let mut simplifier = Simplifier {
-            simplest: (self.clone(), self.cost()),
-            territory: BTreeSet::new(),
-            queue: Vec::new(),
-            count: 0
-        };
-
-        simplifier.discover(self.clone());
-        while let Some(next_expr) = simplifier.queue.pop() {
-            //eprintln!("Queue size: {}", simplifier.queue.len());
-            for derived in Simplifier::derive(&next_expr) {
-                simplifier.discover(derived);
-            }
-        }
-        eprintln!("{}", simplifier.count);
-        let (simplest, _) = simplifier.simplest;
-        simplest
+        Simplifier::simplify(self)
     }
 }
