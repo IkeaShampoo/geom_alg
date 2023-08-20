@@ -654,7 +654,7 @@ impl ops::Mul for ExprComplexity {
 }
 impl fmt::Display for ExprComplexity {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_fmt(format_args!("Terms: {}, Factors: {}", self.num_terms, self.num_factors))
+        f.write_fmt(format_args!("{}T, {}F", self.num_terms, self.num_factors))
     }
 }
 
@@ -698,15 +698,22 @@ impl Simplifier {
             //eprintln!("Complexity: {expr_complexity}");
             let &(_, simplest_cost) = &self.simplest;
             
+            /*
+            if expr_complexity > self.complexity {
+                eprintln!("Current simplest: {}, {}", self.complexity, self.simplest.0);
+                eprintln!("More complex: {}, {expr}", expr_complexity)
+            }
+             */
             if expr_complexity < self.complexity {
-                eprintln!("New complexity: {}", self.complexity);
+                //eprintln!("New complexity: {}", expr_complexity);
+                //eprintln!("Count: {}", self.count);
                 self.simplest = (expr.clone(), expr_cost);
                 self.territory = BTreeSet::new();
                 self.queue = Vec::new();
-                self.count = 0;
+                //self.count = 0;
                 self.complexity = expr_complexity;
             }
-            else if expr_cost < simplest_cost {
+            else if expr_complexity == self.complexity && expr_cost < simplest_cost {
                 //eprintln!("{expr}");
                 self.simplest = (expr.clone(), expr_cost)
             }
