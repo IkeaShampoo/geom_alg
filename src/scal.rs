@@ -1,8 +1,8 @@
 use super::algebra_tools::*;
 
-use std::cmp::{Reverse, Ordering};
+use std::cmp::Ordering;
 use std::{fmt, mem, ops};
-use std::collections::{BinaryHeap, BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 fn gcd(a: u32, b: u32) -> u32 {
     let mut x = a;
@@ -589,7 +589,7 @@ const RULES: [fn(&Scalar) -> Vec<Scalar>; 3] = [
 
 
 
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Copy, Clone, PartialEq)]
 struct ExprCost {
     c: usize,       // Constant cost
     v: usize        // Variable cost
@@ -602,17 +602,12 @@ impl ExprCost {
         else { ExprCost { v: ops_count, c: 0 } }
     }
 }
-impl Ord for ExprCost {
-    fn cmp(&self, other: &Self) -> Ordering {
-        match self.v.cmp(&other.v) {
-            Ordering::Equal => self.c.cmp(&other.c),
-            x => x
-        }
-    }
-}
 impl PartialOrd for ExprCost {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
+        match self.v.cmp(&other.v) {
+            Ordering::Equal => Some(self.c.cmp(&other.c)),
+            x => Some(x)
+        }
     }
 }
 impl ops::Add for ExprCost {
@@ -665,13 +660,10 @@ impl fmt::Display for ExprComplexity {
 
 
 
-#[derive(PartialEq, PartialOrd, Eq, Ord)]
-struct CostedScalar(ExprCost, Scalar);
-
 struct Simplifier {
     simplest: (Scalar, ExprCost),
     territory: BTreeSet<Scalar>,
-    queue: BinaryHeap<Reverse<CostedScalar>>,
+    queue: Vec<Scalar>,
     count: usize,
     complexity: ExprComplexity
 }
@@ -681,13 +673,13 @@ impl Simplifier {
         let mut simplifier = Simplifier {
             simplest: (expr.clone(), expr.cost()),
             territory: BTreeSet::new(),
-            queue: BinaryHeap::new(),
+            queue: Vec::new(),
             count: 0,
             complexity: expr.complexity()
         };
 
         simplifier.discover(expr.clone());
-        while let Some(Reverse(CostedScalar(_, next_expr))) = simplifier.queue.pop() {
+        while let Some(next_expr) = simplifier.queue.pop() {
             //eprintln!("Queue size: {}", simplifier.queue.len());
             for derived in Simplifier::derive(&next_expr) {
                 simplifier.discover(derived);
@@ -707,11 +699,10 @@ impl Simplifier {
             let &(_, simplest_cost) = &self.simplest;
             
             if expr_complexity < self.complexity {
-                //eprintln!("Count: {}", self.count);
                 eprintln!("New complexity: {}", self.complexity);
                 self.simplest = (expr.clone(), expr_cost);
                 self.territory = BTreeSet::new();
-                self.queue = BinaryHeap::new();
+                self.queue = Vec::new();
                 self.count = 0;
                 self.complexity = expr_complexity;
             }
@@ -720,7 +711,7 @@ impl Simplifier {
                 self.simplest = (expr.clone(), expr_cost)
             }
             self.territory.insert(expr.clone());
-            self.queue.push(Reverse(CostedScalar(expr_cost, expr)));
+            self.queue.push(expr);
             self.count += 1;
         }
     }
