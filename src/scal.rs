@@ -1,8 +1,8 @@
 use super::algebra_tools::*;
 
-use std::cmp::Ordering;
+use std::cmp::{Reverse, Ordering};
 use std::{fmt, mem, ops};
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BinaryHeap, BTreeMap, BTreeSet, VecDeque};
 
 fn gcd(a: u32, b: u32) -> u32 {
     let mut x = a;
@@ -393,14 +393,16 @@ impl fmt::Display for Scalar {
                 }
                 f.write_str(")")
             },
-            Scalar::Product(s) => {
-                f.write_str("(")?;
-                for i in 0..s.len() {
-                    if i > 0 { f.write_str(" * ")?; }
-                    Exponential::fmt(&s[i], f)?;
+            Scalar::Product(s) => 
+                if s.len() == 1 { Exponential::fmt(&s[0], f) }
+                else {
+                    f.write_str("(")?;
+                    for i in 0..s.len() {
+                        if i > 0 { f.write_str(" * ")?; }
+                        Exponential::fmt(&s[i], f)?;
+                    }
+                    f.write_str(")")
                 }
-                f.write_str(")")
-            }
         }
     }
 }
@@ -587,7 +589,7 @@ const RULES: [fn(&Scalar) -> Vec<Scalar>; 3] = [
 
 
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, Eq)]
 struct ExprCost {
     c: usize,       // Constant cost
     v: usize        // Variable cost
@@ -600,12 +602,17 @@ impl ExprCost {
         else { ExprCost { v: ops_count, c: 0 } }
     }
 }
+impl Ord for ExprCost {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match self.v.cmp(&other.v) {
+            Ordering::Equal => self.c.cmp(&other.c),
+            x => x
+        }
+    }
+}
 impl PartialOrd for ExprCost {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        match self.v.cmp(&other.v) {
-            Ordering::Equal => Some(self.c.cmp(&other.c)),
-            x => Some(x)
-        }
+        Some(self.cmp(other))
     }
 }
 impl ops::Add for ExprCost {
@@ -658,10 +665,13 @@ impl fmt::Display for ExprComplexity {
 
 
 
+#[derive(PartialEq, PartialOrd, Eq, Ord)]
+struct CostedScalar(ExprCost, Scalar);
+
 struct Simplifier {
     simplest: (Scalar, ExprCost),
     territory: BTreeSet<Scalar>,
-    queue: Vec<Scalar>,
+    queue: BinaryHeap<Reverse<CostedScalar>>,
     count: usize,
     complexity: ExprComplexity
 }
@@ -671,13 +681,13 @@ impl Simplifier {
         let mut simplifier = Simplifier {
             simplest: (expr.clone(), expr.cost()),
             territory: BTreeSet::new(),
-            queue: Vec::new(),
+            queue: BinaryHeap::new(),
             count: 0,
             complexity: expr.complexity()
         };
 
         simplifier.discover(expr.clone());
-        while let Some(next_expr) = simplifier.queue.pop() {
+        while let Some(Reverse(CostedScalar(_, next_expr))) = simplifier.queue.pop() {
             //eprintln!("Queue size: {}", simplifier.queue.len());
             for derived in Simplifier::derive(&next_expr) {
                 simplifier.discover(derived);
@@ -697,10 +707,11 @@ impl Simplifier {
             let &(_, simplest_cost) = &self.simplest;
             
             if expr_complexity < self.complexity {
+                //eprintln!("Count: {}", self.count);
                 eprintln!("New complexity: {}", self.complexity);
                 self.simplest = (expr.clone(), expr_cost);
                 self.territory = BTreeSet::new();
-                self.queue = Vec::new();
+                self.queue = BinaryHeap::new();
                 self.count = 0;
                 self.complexity = expr_complexity;
             }
@@ -709,7 +720,7 @@ impl Simplifier {
                 self.simplest = (expr.clone(), expr_cost)
             }
             self.territory.insert(expr.clone());
-            self.queue.push(expr);
+            self.queue.push(Reverse(CostedScalar(expr_cost, expr)));
             self.count += 1;
         }
     }
