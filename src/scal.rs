@@ -52,6 +52,14 @@ impl Rational {
     pub fn round_to_zero(self) -> i32 {
         self.n / self.d as i32
     }
+    pub fn round_from_zero(self) -> i32 {
+        if self.n % self.d as i32 == 0 {
+            self.n / self.d as i32
+        }
+        else {
+            (self.n / self.d as i32) + if self.n.is_negative() {-1} else {1}
+        }
+    }
 }
 
 impl From<i32> for Rational {
@@ -698,12 +706,6 @@ impl Simplifier {
             //eprintln!("Complexity: {expr_complexity}");
             let &(_, simplest_cost) = &self.simplest;
             
-            /*
-            if expr_complexity > self.complexity {
-                eprintln!("Current simplest: {}, {}", self.complexity, self.simplest.0);
-                eprintln!("More complex: {}, {expr}", expr_complexity)
-            }
-             */
             if expr_complexity < self.complexity {
                 //eprintln!("New complexity: {}", expr_complexity);
                 //eprintln!("Count: {}", self.count);
@@ -770,6 +772,14 @@ fn mul_exp(factors: Vec<Exponential>) -> Scalar {
     mul_all(factors.len(), factors.into_iter().map(|f| Scalar::from(f)))
 }
 
+
+pub struct FragmentedScalar {
+    expr: Scalar,
+    temp_vars: usize,
+    subexprs: BTreeMap<Scalar, Scalar>
+}
+
+
 impl Scalar {
     pub const ZERO: Scalar = Scalar::Rational(Rational::ZERO);
     pub const ONE: Scalar = Scalar::Rational(Rational::ONE);
@@ -778,33 +788,38 @@ impl Scalar {
         self ^ -Rational::ONE
     }
 
-    fn replace(self, to_replace: &String, replace_with: &Scalar) -> Scalar {
-        match self {
+    fn replace(self, to_replace: &Scalar, replace_with: &Scalar) -> Scalar {
+        if self.eq(to_replace) { replace_with.clone() }
+        else { match self {
             Scalar::Sum(terms) => add_all(terms.len(), terms.into_iter()
                 .map(|term| term.replace(to_replace, replace_with))),
             Scalar::Product(factors) => mul_all(factors.len(), factors.into_iter()
                 .map(|Exponential { b: factor_base, e: factor_exp }|
-                     factor_base.replace(to_replace, replace_with) ^ factor_exp)),
-            Scalar::Variable(x) =>
-                if x == *to_replace { replace_with.clone() }
-                else { Scalar::Variable(x) },
+                        factor_base.replace(to_replace, replace_with) ^ factor_exp)),
             x => x
+        }}
+    }
+
+    fn replace_all(self, replacements: &BTreeMap<Scalar, Scalar>) -> Scalar {
+        match replacements.get(&self) {
+            Some(replacement) => replacement.clone(),
+            None => match self {
+                Scalar::Sum(terms) => add_all(terms.len(), terms.into_iter()
+                    .map(|term| term.replace_all(replacements))),
+                Scalar::Product(factors) => mul_all(factors.len(), factors.into_iter()
+                    .map(|Exponential { b: factor_base, e: factor_exp }|
+                         factor_base.replace_all(replacements) ^ factor_exp)),
+                x => x
+            }
         }
     }
 
-    fn replace_all(self, replacements: &BTreeMap<String, &Scalar>) -> Scalar {
-        match self {
-            Scalar::Sum(terms) => add_all(terms.len(), terms.into_iter()
-                .map(|term| term.replace_all(replacements))),
-            Scalar::Product(factors) => mul_all(factors.len(), factors.into_iter()
-                .map(|Exponential { b: factor_base, e: factor_exp }|
-                     factor_base.replace_all(replacements) ^ factor_exp)),
-            Scalar::Variable(x) => match replacements.get(&x) {
-                Some(replacement) => (*replacement).clone(),
-                None => Scalar::Variable(x)
-            }
-            x => x
+    fn map_variables(&self, other: &Scalar) -> Option<BTreeMap<String, &Scalar>> {
+        fn map_variables_rec(this: &Scalar, other: &Scalar, 
+                             map: &mut BTreeMap<String, &Scalar>) -> bool {
+            todo!()
         }
+        todo!()
     }
 
     // use on a Scalar that may have an incorrect form (like a sum with one term)
@@ -874,14 +889,60 @@ impl Scalar {
                 |a, b| a + b, &ExprComplexity::ADD_IDENTITY),
             Scalar::Product(factors) => merge_seq(factors.iter()
                     .map(|factor| exponentiate(factor.b.complexity(), 
-                        factor.e.round_to_zero().unsigned_abs(), ExprComplexity::MUL_IDENTITY)),
+                        factor.e.round_from_zero().unsigned_abs(), ExprComplexity::MUL_IDENTITY)),
                 |a, b| a * b, &ExprComplexity::MUL_IDENTITY),
             _ => ExprComplexity { num_terms: 1, num_factors: 1 }
         }
     }
 
     pub fn simplified(&self) -> Scalar {
-        //let amogus = Scalar::Variable(String::from(char::from_u32(0xD9E).unwrap()));
         Simplifier::simplify(self)
+    }
+
+    pub fn fragment(self) -> FragmentedScalar {
+        //let amogus = char::from_u32(0xD9E).unwrap().to_string();
+        fn get_chain(expr: Scalar, chains: &mut Vec<Scalar>) -> Option<Scalar> {
+            match expr {
+                Scalar::Variable(x) => match x.parse::<usize>() {
+                    Ok(i) => {
+                        chains.push(Scalar::ZERO);
+                        Some(chains.swap_remove(i))
+                    }
+                    _ => None
+                }
+                _ => None
+            }
+        }
+        
+        fn collect_chains(expr: Scalar, sums: &mut Vec<Vec<Scalar>>, 
+                          products: &mut Vec<Vec<Exponential>>) -> Scalar {
+            match expr {
+                Scalar::Sum(terms) => {
+                    let new_terms = terms.into_iter()
+                        .map(|term| collect_chains(term, sums, products)).collect();
+                    sums.push(new_terms);
+                    Scalar::Variable((sums.len() - 1).to_string())
+                }
+                Scalar::Product(factors) => {
+                    let new_factors = factors.into_iter().map(|factor| Exponential {
+                            b: collect_chains(factor.b, sums, products), 
+                            e: factor.e }).collect();
+                    products.push(new_factors);
+                    Scalar::Variable((products.len() - 1).to_string())
+                }
+                x => x
+            }
+        }
+
+        todo!()
+
+        /*
+        Log all argument sets for sums/products
+        Find each sum's set's intersection with each other sum's set (repeat for products)
+        Create fragment expression for each intersection, replace all occurances of the
+            intersection (even those within other fragments) with the fragment's name.
+            If the smallest intersections are fragmented first, then existing fragments don't
+                have to be searched for the occurances of new fragments. 
+         */
     }
 }
