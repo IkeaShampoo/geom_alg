@@ -15,7 +15,7 @@ mod tests {
     fn basic_addition_test() {
         let watch = Stopwatch::new_running();
         let x = Scalar::from(Rational::from(5));
-        let a = Scalar::Variable(String::from("a"));
+        let a = Scalar::from("a");
         let xa = x.clone() + a.clone();
         let ax = a.clone() + x.clone();
 
@@ -30,7 +30,7 @@ mod tests {
     fn basic_multiplication_test() {
         let watch = Stopwatch::new_running();
         let x = Scalar::from(Rational::from(5));
-        let a = Scalar::Variable(String::from("a"));
+        let a = Scalar::from("a");
         let xa = x.clone() * a.clone();
         let ax = a.clone() * x.clone();
 

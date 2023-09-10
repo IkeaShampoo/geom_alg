@@ -135,7 +135,7 @@ impl ops::BitXor<i32> for Rational {
 
 
 #[derive(Clone, PartialEq, Eq, Debug)]
-pub struct Exponential {
+struct Exponential {
     b: Scalar, e: Rational
 }
 
@@ -169,43 +169,74 @@ impl fmt::Display for Exponential {
 
 
 #[derive(Clone, PartialEq, PartialOrd, Eq, Ord)]
-pub enum Scalar {
+enum S {
     Variable(String),
     Rational(Rational),
     Sum(Vec<Scalar>),
     Product(Vec<Exponential>),
 }
+impl From<Exponential> for S {
+    fn from(exponential: Exponential) -> Self {
+        match exponential.e {
+            Rational::ZERO => S::ONE,
+            Rational::ONE => match exponential.b { Scalar(x) => x },
+            _ => if exponential.b == Rational::ONE { S::ONE }
+                 else { S::Product(vec![exponential]) }
+        }
+    }
+}
+impl S {
+    const ZERO: S = S::Rational(Rational::ZERO);
+    const ONE: S = S::Rational(Rational::ONE);
+
+    // use on a Scalar that may have an incorrect form (like a sum with one term)
+    // does not re-order unordered subexpressions
+    fn correct_form(self) -> Self {
+        match self {
+            S::Sum(mut terms) => match terms.len() {
+                0 => S::ZERO,
+                1 => match terms.pop() {
+                    Some(Scalar(only_term)) => only_term,
+                    None => S::ZERO
+                }
+                _ => S::Sum(terms)
+            }
+            S::Product(mut factors) => match factors.len() {
+                0 => S::ONE,
+                1 => match factors.pop() {
+                    Some(only_factor) => S::from(only_factor),
+                    None => S::ONE
+                }
+                _ => S::Product(factors)
+            }
+            x => x
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, PartialOrd, Eq, Ord)]
+pub struct Scalar(S);
 
 impl From<String> for Scalar {
     fn from(name: String) -> Self {
-        Scalar::Variable(name)
+        Scalar(S::Variable(name))
     }
 }
 impl From<&str> for Scalar {
     fn from(name: &str) -> Self {
-        Scalar::Variable(String::from(name))
+        Scalar(S::Variable(String::from(name)))
     }
 }
 impl From<Rational> for Scalar {
     fn from(fraction: Rational) -> Self {
-        Scalar::Rational(fraction)
-    }
-}
-impl From<Exponential> for Scalar {
-    fn from(exponential: Exponential) -> Self {
-        match exponential.e {
-            Rational::ZERO => Scalar::ONE,
-            Rational::ONE => exponential.b,
-            _ => if exponential.b == Rational::ONE { Scalar::ONE }
-                 else { Scalar::Product(vec![exponential]) }
-        }
+        Scalar(S::Rational(fraction))
     }
 }
 impl TryInto<Vec<Scalar>> for Scalar {
     type Error = &'static str;
     fn try_into(self) -> Result<Vec<Scalar>, Self::Error> {
         match self {
-            Scalar::Sum(terms) => Ok(terms),
+            Scalar(S::Sum(terms)) => Ok(terms),
             _ => Err("This is not a Scalar::Sum")
         }
     }
@@ -214,7 +245,7 @@ impl TryInto<Vec<Exponential>> for Scalar {
     type Error = &'static str;
     fn try_into(self) -> Result<Vec<Exponential>, Self::Error> {
         match self {
-            Scalar::Product(factors) => Ok(factors),
+            Scalar(S::Product(factors)) => Ok(factors),
             _ => Err("This is not a Scalar::Product")
         }
     }
@@ -236,20 +267,20 @@ impl ops::Add for Scalar {
     type Output = Self;
     fn add(self, rhs: Self) -> Self::Output {
         match (self, rhs) {
-            (Scalar::Rational(lhs), Scalar::Rational(rhs)) => Scalar::Rational(lhs + rhs),
-            (Scalar::Sum(lhs), Scalar::Sum(rhs)) => {
+            (Scalar(S::Rational(lhs)), Scalar(S::Rational(rhs))) => Scalar(S::Rational(lhs + rhs)),
+            (Scalar(S::Sum(lhs)), Scalar(S::Sum(rhs))) => {
                 let mut lhs: VecDeque<Scalar> = VecDeque::from(lhs);
                 let mut rhs: VecDeque<Scalar> = VecDeque::from(rhs);
                 let mut new_terms: Vec<Scalar> = Vec::with_capacity(lhs.len() + rhs.len());
                 while let (Some(lhs_next), Some(rhs_next)) = (lhs.front(), rhs.front()) {
                     match (lhs_next, rhs_next) {
                         // Each sum will only have up to one rational term
-                        (&Scalar::Rational(lhs_next), &Scalar::Rational(rhs_next)) => {
+                        (&Scalar(S::Rational(lhs_next)), &Scalar(S::Rational(rhs_next))) => {
                             lhs.pop_front();
                             rhs.pop_front();
                             let rat_sum = lhs_next + rhs_next;
                             if rat_sum != Rational::ZERO {
-                                new_terms.push(Scalar::Rational(rat_sum));
+                                new_terms.push(Scalar(S::Rational(rat_sum)));
                             }
                         }
                         (lhs_next, rhs_next) => {
@@ -264,16 +295,16 @@ impl ops::Add for Scalar {
                 new_terms.append(&mut Vec::from(lhs));
                 new_terms.append(&mut Vec::from(rhs));
                 //println!("Final sum: {:?}", new_terms);
-                Scalar::Sum(new_terms).correct_form()
+                Scalar(S::Sum(new_terms).correct_form())
             }
             (lhs, rhs) => {
                 if lhs == Rational::ZERO { return rhs; }
                 if rhs == Rational::ZERO { return lhs; }
                 let (old_terms, new_term): (Vec<Scalar>, Scalar) =
-                    if let Scalar::Sum(lhs) = lhs { (lhs, rhs) }
-                    else if let Scalar::Sum(rhs) = rhs { (rhs, lhs) }
+                    if let Scalar(S::Sum(lhs)) = lhs { (lhs, rhs) }
+                    else if let Scalar(S::Sum(rhs)) = rhs { (rhs, lhs) }
                     else { (vec![lhs], rhs) };
-                Scalar::Sum(old_terms) + Scalar::Sum(vec![new_term])
+                Scalar(S::Sum(old_terms)) + Scalar(S::Sum(vec![new_term]))
             }
         }
     }
@@ -290,8 +321,8 @@ impl ops::Mul for Scalar {
         const EXPECT_ERR: &str = "Factor does not exist";
 
         match (self, rhs) {
-            (Scalar::Rational(lhs), Scalar::Rational(rhs)) => Scalar::Rational(lhs * rhs),
-            (Scalar::Product(lhs), Scalar::Product(rhs)) => {
+            (Scalar(S::Rational(lhs)), Scalar(S::Rational(rhs))) => Scalar(S::Rational(lhs * rhs)),
+            (Scalar(S::Product(lhs)), Scalar(S::Product(rhs))) => {
                 let mut lhs: VecDeque<Exponential> = VecDeque::from(lhs);
                 let mut rhs: VecDeque<Exponential> = VecDeque::from(rhs);
                 let mut new_factors: Vec<Exponential> = Vec::with_capacity(lhs.len() + rhs.len());
@@ -312,17 +343,18 @@ impl ops::Mul for Scalar {
                 }
                 new_factors.append(&mut Vec::from(lhs));
                 new_factors.append(&mut Vec::from(rhs));
-                Scalar::Product(new_factors).correct_form()
+                Scalar(S::Product(new_factors).correct_form())
             }
             (Scalar::ZERO, _) | (_, Scalar::ZERO) => return Scalar::ZERO,
             (Scalar::ONE, rhs) => rhs,
             (lhs, Scalar::ONE) => lhs,
             (lhs, rhs) => {
                 let (old_factors, new_factor): (Vec<Exponential>, Scalar) =
-                    if let Scalar::Product(lhs) = lhs { (lhs, rhs) }
-                    else if let Scalar::Product(rhs) = rhs { (rhs, lhs) }
+                    if let Scalar(S::Product(lhs)) = lhs { (lhs, rhs) }
+                    else if let Scalar(S::Product(rhs)) = rhs { (rhs, lhs) }
                     else { (vec![Exponential::from(lhs)], rhs) };
-                Scalar::Product(old_factors) * Scalar::Product(vec![Exponential::from(new_factor)])
+                Scalar(S::Product(old_factors)) * 
+                    Scalar(S::Product(vec![Exponential::from(new_factor)]))
             }
         }
     }
@@ -346,13 +378,13 @@ impl ops::BitXor<Rational> for Scalar {
                     else { Scalar::Product(vec![Exponential { b: Scalar::Rational(x), e: exp }]) }
                 }
                  */
-                Scalar::Product(mut factors) => {
+                Scalar(S::Product(mut factors)) => {
                     for factor in &mut factors {
                         (*factor).e = (*factor).e * exp;
                     }
-                    Scalar::Product(factors)
+                    Scalar(S::Product(factors))
                 }
-                x => Scalar::Product(vec![Exponential { b: x, e: exp }])
+                x => Scalar(S::Product(vec![Exponential { b: x, e: exp }]))
             }
         }
     }
@@ -373,7 +405,7 @@ impl ops::SubAssign for Scalar {
 impl ops::Neg for Scalar {
     type Output = Self;
     fn neg(self) -> Self {
-        Scalar::Rational(-Rational::ONE) * self
+        Scalar(S::Rational(-Rational::ONE)) * self
     }
 }
 impl ops::Div for Scalar {
@@ -391,9 +423,9 @@ impl ops::DivAssign for Scalar {
 impl fmt::Display for Scalar {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Scalar::Rational(s) => Rational::fmt(s, f),
-            Scalar::Variable(s) => f.write_str(s.as_str()),
-            Scalar::Sum(s) => {
+            Scalar(S::Rational(s)) => Rational::fmt(s, f),
+            Scalar(S::Variable(s)) => f.write_str(s.as_str()),
+            Scalar(S::Sum(s)) => {
                 f.write_str("(")?;
                 for i in 0..s.len() {
                     if i > 0 { f.write_str(" + ")?; }
@@ -401,7 +433,7 @@ impl fmt::Display for Scalar {
                 }
                 f.write_str(")")
             },
-            Scalar::Product(s) => 
+            Scalar(S::Product(s)) => 
                 if s.len() == 1 { Exponential::fmt(&s[0], f) }
                 else {
                     f.write_str("(")?;
@@ -425,7 +457,7 @@ impl fmt::Debug for Scalar {
 const RULES: [fn(&Scalar) -> Vec<Scalar>; 3] = [
     // Factorization
     |x| match x {
-        Scalar::Sum(terms) => {
+        Scalar(S::Sum(terms)) => {
             #[derive(Copy, Clone)]
             struct FactorIndex {
                 t_idx: usize,
@@ -447,7 +479,7 @@ const RULES: [fn(&Scalar) -> Vec<Scalar>; 3] = [
             let mut factors_indices: FactorIndexer = BTreeMap::new();
             for i in 0..terms.len() {
                 match &terms[i] {
-                    Scalar::Product(factors) =>
+                    Scalar(S::Product(factors)) =>
                         for j in 0..factors.len() {
                             let factor = &factors[j];
                             index_factor(&mut factors_indices, &factor.b, factor.e, i, j);
@@ -462,14 +494,14 @@ const RULES: [fn(&Scalar) -> Vec<Scalar>; 3] = [
 
                     fn remove_factor(term: Scalar, factor_index: usize, exp: Rational) -> Scalar {
                         match term {
-                            Scalar::Product(mut factors) => {
+                            Scalar(S::Product(mut factors)) => {
                                 if factors[factor_index].e == exp {
                                     factors.remove(factor_index);
                                 }
                                 else {
                                     factors[factor_index].e = factors[factor_index].e - exp;
                                 }
-                                Scalar::Product(factors).correct_form()
+                                Scalar(S::Product(factors).correct_form())
                             }
                             _ => Scalar::ONE
                         }
@@ -488,7 +520,7 @@ const RULES: [fn(&Scalar) -> Vec<Scalar>; 3] = [
                                 else { t_idx2 - 1 }
                             );
 
-                            factorizations.push(Scalar::Sum(new_terms).correct_form() +
+                            factorizations.push(Scalar(S::Sum(new_terms).correct_form()) +
                                                 (factor.clone() ^ exp) *
                                                 (remove_factor(term1, f_idx1, exp) +
                                                  remove_factor(term2, f_idx2, exp)));
@@ -503,13 +535,13 @@ const RULES: [fn(&Scalar) -> Vec<Scalar>; 3] = [
 
     // Distribution and combination of rational-based exponentials
     |x| match x {
-        Scalar::Product(factors) => {
+        Scalar(S::Product(factors)) => {
             let mut distributions: Vec<Scalar> = Vec::new();
             for index1 in 0..factors.len() {
                 for index2 in 0..factors.len() {
                     // Combination of rational-based exponentials
-                    if let (Exponential { b: Scalar::Rational(b1), e: e1 },
-                            Exponential { b: Scalar::Rational(b2), e: e2 }) =
+                    if let (Exponential { b: Scalar(S::Rational(b1)), e: e1 },
+                            Exponential { b: Scalar(S::Rational(b2)), e: e2 }) =
                            (&factors[index1], &factors[index2]) {
                         let e_ratio = *e2 / *e1;
                         // e2 = e1 * e_ratio
@@ -519,12 +551,12 @@ const RULES: [fn(&Scalar) -> Vec<Scalar>; 3] = [
                             let mut other_factors = factors.clone();
                             other_factors.remove(index1);
                             other_factors.remove(if index2 < index1 { index2 } else {index2 - 1 });
-                            distributions.push(Scalar::Product(other_factors).correct_form() *
-                                               (Scalar::Rational(b1 * (b2 ^ e_ratio.n)) ^ e1));
+                            distributions.push(Scalar(S::Product(other_factors).correct_form()) *
+                                               (Scalar(S::Rational(b1 * (b2 ^ e_ratio.n))) ^ e1));
                         }
                     }
                     // Distribution
-                    else if let Scalar::Sum(_) = &(factors[index2].b) {
+                    else if let Scalar(S::Sum(_)) = &(factors[index2].b) {
                         fn distribute(distributions: &mut Vec<Scalar>, other_factors: Scalar,
                                       terms: Vec<Scalar>, terms_exp: Rational,
                                       distributed: Scalar) {
@@ -533,25 +565,25 @@ const RULES: [fn(&Scalar) -> Vec<Scalar>; 3] = [
                                 let term = other_terms.remove(i);
                                 distributions.push(other_factors.clone() * ((
                                     distributed.clone() * term +
-                                    distributed.clone() * Scalar::Sum(other_terms).correct_form()
+                                    distributed.clone() * Scalar(S::Sum(other_terms).correct_form())
                                 ) ^ terms_exp));
                             }
                         }
 
                         // distribute factor into another factor
                         if factors[index1].e == factors[index2].e && index1 != index2 {
-                            let mut other_factors: Vec<Exponential> = factors.clone();
-                            let distributed: Scalar = Scalar::from(other_factors.remove(index1));
+                            let mut other_factors = factors.clone();
+                            let distributed = Scalar(S::from(other_factors.remove(index1)));
                             let (terms, terms_exp) = match other_factors.remove(
                                 if index2 < index1 { index2 }
                                 else { index2 - 1 }
                             ) {
-                                Exponential { b: Scalar::Sum(terms), e: exp} => (terms, exp),
+                                Exponential { b: Scalar(S::Sum(terms)), e: exp} => (terms, exp),
                                 not_a_sum => panic!("{not_a_sum} is not a sum")
                             };
 
                             distribute(&mut distributions,
-                                       Scalar::Product(other_factors).correct_form(),
+                                       Scalar(S::Product(other_factors).correct_form()),
                                        terms, terms_exp, distributed);
                         }
 
@@ -588,7 +620,7 @@ const RULES: [fn(&Scalar) -> Vec<Scalar>; 3] = [
 
     // (Not Started) Exponentiation of rational-based exponentials
     |x| match x {
-        Scalar::Product(factors) => {
+        Scalar(S::Product(factors)) => {
             Vec::new()
         }
         _ => Vec::new()
@@ -732,21 +764,21 @@ impl Simplifier {
             transformed.append(&mut (*rule)(expr));
         }
         match expr {
-            Scalar::Sum(terms) => {
+            Scalar(S::Sum(terms)) => {
                 for (i, term) in terms.iter().enumerate() {
                     for trans_term in Simplifier::derive(term) {
                         let mut new_terms: Vec<Scalar> = terms.clone();
                         new_terms.remove(i);
-                        transformed.push(Scalar::Sum(new_terms).correct_form() + trans_term);
+                        transformed.push(Scalar(S::Sum(new_terms).correct_form()) + trans_term);
                     }
                 }
             }
-            Scalar::Product(factors) => {
+            Scalar(S::Product(factors)) => {
                 for (i, factor) in factors.iter().enumerate() {
                     for trans_factor in Simplifier::derive(&factor.b) {
                         let mut new_factors: Vec<Exponential> = factors.clone();
                         new_factors.remove(i);
-                        transformed.push(Scalar::Product(new_factors).correct_form() *
+                        transformed.push(Scalar(S::Product(new_factors).correct_form()) *
                                          (trans_factor ^ factor.e));
                     }
                 }
@@ -769,7 +801,7 @@ fn mul_all(size: usize, factors: impl Iterator<Item = Scalar>) -> Scalar {
 }
 #[inline(always)]
 fn mul_exp(factors: Vec<Exponential>) -> Scalar {
-    mul_all(factors.len(), factors.into_iter().map(|f| Scalar::from(f)))
+    mul_all(factors.len(), factors.into_iter().map(|f| Scalar(S::from(f))))
 }
 
 
@@ -781,8 +813,8 @@ pub struct FragmentedScalar {
 
 
 impl Scalar {
-    pub const ZERO: Scalar = Scalar::Rational(Rational::ZERO);
-    pub const ONE: Scalar = Scalar::Rational(Rational::ONE);
+    pub const ZERO: Scalar = Scalar(S::Rational(Rational::ZERO));
+    pub const ONE: Scalar = Scalar(S::Rational(Rational::ONE));
 
     pub fn mul_inv(self) -> Self {
         self ^ -Rational::ONE
@@ -791,9 +823,9 @@ impl Scalar {
     fn replace(self, to_replace: &Scalar, replace_with: &Scalar) -> Scalar {
         if self.eq(to_replace) { replace_with.clone() }
         else { match self {
-            Scalar::Sum(terms) => add_all(terms.len(), terms.into_iter()
+            Scalar(S::Sum(terms)) => add_all(terms.len(), terms.into_iter()
                 .map(|term| term.replace(to_replace, replace_with))),
-            Scalar::Product(factors) => mul_all(factors.len(), factors.into_iter()
+            Scalar(S::Product(factors)) => mul_all(factors.len(), factors.into_iter()
                 .map(|Exponential { b: factor_base, e: factor_exp }|
                         factor_base.replace(to_replace, replace_with) ^ factor_exp)),
             x => x
@@ -804,9 +836,9 @@ impl Scalar {
         match replacements.get(&self) {
             Some(replacement) => replacement.clone(),
             None => match self {
-                Scalar::Sum(terms) => add_all(terms.len(), terms.into_iter()
+                Scalar(S::Sum(terms)) => add_all(terms.len(), terms.into_iter()
                     .map(|term| term.replace_all(replacements))),
-                Scalar::Product(factors) => mul_all(factors.len(), factors.into_iter()
+                Scalar(S::Product(factors)) => mul_all(factors.len(), factors.into_iter()
                     .map(|Exponential { b: factor_base, e: factor_exp }|
                          factor_base.replace_all(replacements) ^ factor_exp)),
                 x => x
@@ -822,35 +854,11 @@ impl Scalar {
         todo!()
     }
 
-    // use on a Scalar that may have an incorrect form (like a sum with one term)
-    // does not re-order unordered subexpressions
-    fn correct_form(self) -> Self {
-        match self {
-            Scalar::Sum(mut terms) => match terms.len() {
-                0 => Scalar::ZERO,
-                1 => match terms.pop() {
-                    Some(only_term) => only_term,
-                    None => Scalar::ZERO
-                }
-                _ => Scalar::Sum(terms)
-            }
-            Scalar::Product(mut factors) => match factors.len() {
-                0 => Scalar::ONE,
-                1 => match factors.pop() {
-                    Some(only_factor) => Scalar::from(only_factor),
-                    None => Scalar::ONE
-                }
-                _ => Scalar::Product(factors)
-            }
-            x => x
-        }
-    }
-
     fn is_constant(&self) -> bool {
         match self {
-            Scalar::Rational(_) => true,
-            Scalar::Variable(x) => *x == x.to_uppercase(),
-            Scalar::Sum(terms) => {
+            Scalar(S::Rational(_)) => true,
+            Scalar(S::Variable(x)) => *x == x.to_uppercase(),
+            Scalar(S::Sum(terms)) => {
                 for term in terms {
                     if !term.is_constant() {
                         return false;
@@ -858,7 +866,7 @@ impl Scalar {
                 }
                 true
             }
-            Scalar::Product(factors) => {
+            Scalar(S::Product(factors)) => {
                 for factor in factors {
                     if !factor.b.is_constant() {
                         return false;
@@ -871,10 +879,10 @@ impl Scalar {
 
     fn cost(&self) -> ExprCost {
         match self {
-            Scalar::Sum(terms) => merge_seq(terms.iter().map(|term| term.cost()),
+            Scalar(S::Sum(terms)) => merge_seq(terms.iter().map(|term| term.cost()),
                     |a, b| a + b, &ExprCost::ZERO) + 
                 ExprCost::new(terms.len() - 1, self.is_constant()),
-            Scalar::Product(factors) => merge_seq(factors.iter().map(|factor| factor.b.cost()),
+            Scalar(S::Product(factors)) => merge_seq(factors.iter().map(|factor| factor.b.cost()),
                     |a, b| a + b, &ExprCost::ZERO) + 
                 ExprCost::new(factors.len() - 1, self.is_constant()),
             _ => ExprCost::ZERO
@@ -885,9 +893,9 @@ impl Scalar {
     //  this expression without the addition of new term/factor pairs that cancel each other out
     fn complexity(&self) -> ExprComplexity {
         match self {
-            Scalar::Sum(terms) => merge_seq(terms.iter().map(|term| term.complexity()), 
+            Scalar(S::Sum(terms)) => merge_seq(terms.iter().map(|term| term.complexity()), 
                 |a, b| a + b, &ExprComplexity::ADD_IDENTITY),
-            Scalar::Product(factors) => merge_seq(factors.iter()
+            Scalar(S::Product(factors)) => merge_seq(factors.iter()
                     .map(|factor| exponentiate(factor.b.complexity(), 
                         factor.e.round_from_zero().unsigned_abs(), ExprComplexity::MUL_IDENTITY)),
                 |a, b| a * b, &ExprComplexity::MUL_IDENTITY),
@@ -899,38 +907,109 @@ impl Scalar {
         Simplifier::simplify(self)
     }
 
+    pub fn zero_simplified(&self) -> Scalar {
+        let terms: BTreeMap<Scalar, Rational> = BTreeMap::new();
+        self.simplified()
+    }
+
     pub fn fragment(self) -> FragmentedScalar {
-        //let amogus = char::from_u32(0xD9E).unwrap().to_string();
-        fn get_chain(expr: Scalar, chains: &mut Vec<Scalar>) -> Option<Scalar> {
+        const SUM_PREFIX: &str = "\u{D9E}s";
+        const PRODUCT_PREFIX: &str = "\u{D9E}p";
+
+        fn get_the_chain<'a, T>(idx_str: &str, chains: &'a Vec<Vec<T>>) -> Option<&'a Vec<T>> {
+            match idx_str.parse::<usize>() {
+                Ok(i) => chains.get(i),
+                _ => None
+            }
+            /* Old return for Ok(i) case
+            chains.push(Vec::new());
+            Some(chains.swap_remove(i))
+             */
+        }
+
+        /*
+        fn get_chain(expr: Scalar, sums: &mut Vec<Vec<Scalar>>, 
+                     products: &mut Vec<Vec<Exponential>>) -> Option<Scalar> {
             match expr {
-                Scalar::Variable(x) => match x.parse::<usize>() {
-                    Ok(i) => {
-                        chains.push(Scalar::ZERO);
-                        Some(chains.swap_remove(i))
-                    }
+                Scalar::Variable(x) => match &x[..SUM_PREFIX.len()] {
+                    SUM_PREFIX => get_the_chain(&x[SUM_PREFIX.len()..], sums)
+                        .map_or(None, |terms| Some(Scalar::Sum(terms))),
+                    PRODUCT_PREFIX => get_the_chain(&x[SUM_PREFIX.len()..], products)
+                        .map_or(None, |factors| Some(Scalar::Product(factors))),
                     _ => None
                 }
                 _ => None
             }
         }
+         */
         
         fn collect_chains(expr: Scalar, sums: &mut Vec<Vec<Scalar>>, 
                           products: &mut Vec<Vec<Exponential>>) -> Scalar {
             match expr {
-                Scalar::Sum(terms) => {
-                    let new_terms = terms.into_iter()
+                Scalar(S::Sum(terms)) => {
+                    let new_terms: Vec<Scalar> = terms.into_iter()
                         .map(|term| collect_chains(term, sums, products)).collect();
                     sums.push(new_terms);
-                    Scalar::Variable((sums.len() - 1).to_string())
+                    Scalar(S::Variable(String::from(SUM_PREFIX) + 
+                        (sums.len() - 1).to_string().as_str()))
                 }
-                Scalar::Product(factors) => {
+                Scalar(S::Product(factors)) => {
                     let new_factors = factors.into_iter().map(|factor| Exponential {
-                            b: collect_chains(factor.b, sums, products), 
-                            e: factor.e }).collect();
+                        b: collect_chains(factor.b, sums, products), 
+                        e: factor.e }).collect();
                     products.push(new_factors);
-                    Scalar::Variable((products.len() - 1).to_string())
+                    Scalar(S::Variable(String::from(PRODUCT_PREFIX) + 
+                        (products.len() - 1).to_string().as_str()))
                 }
                 x => x
+            }
+        }
+
+        let mut sums: Vec<Vec<Scalar>> = Vec::new();
+        let mut products: Vec<Vec<Exponential>> = Vec::new();
+        collect_chains(self, &mut sums, &mut products);
+
+        let sums_ref = &mut sums;
+        let products_ref = &mut products;
+
+        let get_sum = |expr| match expr {
+            Scalar(S::Variable(x)) => match &x[..SUM_PREFIX.len()] {
+                SUM_PREFIX => get_the_chain(&x[SUM_PREFIX.len()..], sums_ref),
+                _ => None
+            }
+            _ => None
+        };
+
+        let get_product = |expr| match expr {
+            Scalar(S::Variable(x)) => match &x[..SUM_PREFIX.len()] {
+                PRODUCT_PREFIX => get_the_chain(&x[SUM_PREFIX.len()..], products_ref),
+                _ => None
+            }
+            _ => None
+        };
+
+        for i in 0..sums.len() {
+            for j in 0..sums.len() {
+                // if terms contains sum, remove sum from terms and replace it with i
+                // if sum contains terms, remove terms from sum and replace it with *something*
+                let mut lhs = sums[i].iter().enumerate().peekable();
+                let mut rhs = sums[j].iter().enumerate().peekable();
+                let mut intersection: Vec<(usize, usize)> = 
+                    Vec::with_capacity(usize::max(lhs.len(), rhs.len()));
+                while let (Some((lidx, lhs_next)), Some((ridx, rhs_next))) = 
+                          (lhs.peek(), rhs.peek()) {
+                    match lhs_next.cmp(rhs_next) {
+                        Ordering::Equal => {
+                            intersection.push((*lidx, *ridx));
+                            lhs.next();
+                            rhs.next();
+                        }
+                        _ => {}
+                    }
+                }
+                if intersection.len() > 1 {
+                    
+                }
             }
         }
 

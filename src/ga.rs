@@ -107,27 +107,27 @@ impl PartialOrd for KBlade {
 impl ops::Add for MVec {
     type Output = Self;
     fn add(self, rhs: Self) -> Self::Output {
-        let mut lhs: VecDeque<KBlade> = VecDeque::from(self.blades);
-        let mut rhs: VecDeque<KBlade> = VecDeque::from(rhs.blades);
+        let mut lhs = self.blades.into_iter().peekable();
+        let mut rhs = rhs.blades.into_iter().peekable();
         let mut new_blades: Vec<KBlade> = Vec::with_capacity(lhs.len() + rhs.len());
-        while let (Some(lhs_next), Some(rhs_next)) = (lhs.front(), rhs.front()) {
+        while let (Some(lhs_next), Some(rhs_next)) = (lhs.peek(), rhs.peek()) {
             match lhs_next.cmp(&rhs_next) {
-                Ordering::Less => new_blades.push(lhs.pop_front().unwrap()),
+                Ordering::Less => new_blades.push(lhs.next().unwrap()),
                 Ordering::Equal => {
-                    let (lhs_next, rhs_next) = (lhs.pop_front().unwrap(), rhs.pop_front().unwrap());
+                    let (lhs_next, rhs_next) = (lhs.next().unwrap(), rhs.next().unwrap());
                     let new_blade = KBlade {
                         n: lhs_next.n,
-                        c: (lhs_next.c + rhs_next.c).simplified()
+                        c: (lhs_next.c + rhs_next.c).zero_simplified()
                     };
                     if new_blade.c != Scalar::ZERO {
                         new_blades.push(new_blade);
                     }
                 }
-                Ordering::Greater => new_blades.push(rhs.pop_front().unwrap())
+                Ordering::Greater => new_blades.push(rhs.next().unwrap())
             }
         }
-        new_blades.append(&mut Vec::from(lhs));
-        new_blades.append(&mut Vec::from(rhs));
+        new_blades.extend(lhs);
+        new_blades.extend(rhs);
         MVec { blades: new_blades }
     }
 }
