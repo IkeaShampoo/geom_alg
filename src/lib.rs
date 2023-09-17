@@ -2,11 +2,13 @@ pub mod scal;
 pub mod ga;
 mod algebra_tools;
 mod benchmarking;
+mod rational;
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use scal::*;
+    use rational::*;
     use ga::*;
     use algebra_tools::*;
     use benchmarking::Stopwatch;

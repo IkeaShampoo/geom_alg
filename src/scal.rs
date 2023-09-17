@@ -1,138 +1,9 @@
 use super::algebra_tools::*;
+use super::rational::*;
 
 use std::cmp::Ordering;
 use std::{fmt, mem, ops};
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
-
-fn gcd(a: u32, b: u32) -> u32 {
-    let mut x = a;
-    let mut y = b;
-    let mut r = x % y;
-    while r > 0 {
-        x = y;
-        y = r;
-        r = x % y;
-    }
-    y
-}
-
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
-pub struct Rational { n: i32, d: u32 }
-
-impl Rational {
-    pub const ZERO: Rational = Rational { n: 0, d: 1 };
-    pub const ONE: Rational = Rational { n: 1, d: 1 };
-
-    pub fn new(num: i32, den: i32) -> Rational {
-        let (n, d): (i32, u32) =
-            if den < 0 {(num * -1, (den * -1) as u32)}
-            else { (num, den as u32) };
-        let gcd_nd: u32 = gcd(n.unsigned_abs(), d);
-        return Rational { n: n / (gcd_nd as i32), d: d / gcd_nd };
-    }
-    pub fn abs(self) -> Rational {
-        Rational { n: self.n.abs(), d: self.d }
-    }
-    pub fn floor(self) -> i32 {
-        if self.n.is_positive() || self.n % self.d as i32 == 0 {
-            self.n / self.d as i32
-        }
-        else {
-            (self.n / self.d as i32) - 1
-        }
-    }
-    pub fn ceil(self) -> i32 {
-        if self.n.is_negative() || self.n % self.d as i32 == 0 {
-            self.n / self.d as i32
-        }
-        else {
-            (self.n / self.d as i32) + 1
-        }
-    }
-    pub fn round_to_zero(self) -> i32 {
-        self.n / self.d as i32
-    }
-    pub fn round_from_zero(self) -> i32 {
-        if self.n % self.d as i32 == 0 {
-            self.n / self.d as i32
-        }
-        else {
-            (self.n / self.d as i32) + if self.n.is_negative() {-1} else {1}
-        }
-    }
-}
-
-impl From<i32> for Rational {
-    fn from(integer: i32) -> Self {
-        Rational { n: integer, d: 1 }
-    }
-}
-
-impl fmt::Display for Rational {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.d == 1 { f.write_fmt(format_args!("{}", self.n)) }
-        else { f.write_fmt(format_args!("({}/{})", self.n, self.d)) }
-    }
-}
-
-impl Ord for Rational {
-    fn cmp(&self, other: &Self) -> Ordering {
-        let diff_n: i32 = (self.clone() - other.clone()).n;
-        if diff_n < 0 { return Ordering::Less; }
-        if diff_n > 0 { return Ordering::Greater; }
-        Ordering::Equal
-    }
-}
-impl PartialOrd for Rational {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl ops::Add for Rational {
-    type Output = Self;
-    fn add(self, rhs: Self) -> Self::Output {
-        Rational::new(self.n * rhs.d as i32 + rhs.n * self.d as i32,
-                      (self.d * rhs.d) as i32)
-    }
-}
-
-impl ops::Neg for Rational {
-    type Output = Self;
-    fn neg(self) -> Self::Output {
-        Rational {n: -self.n, d:self.d}
-    }
-}
-impl ops::Sub for Rational {
-    type Output = Self;
-    fn sub(self, rhs: Self) -> Self::Output {
-        Rational::new(self.n * rhs.d as i32 - rhs.n * self.d as i32,
-                      (self.d * rhs.d) as i32)
-    }
-}
-
-impl ops::Mul for Rational {
-    type Output = Self;
-    fn mul(self, rhs: Self) -> Self::Output {
-        Rational::new(self.n * rhs.n, (self.d * rhs.d) as i32)
-    }
-}
-impl ops::Div for Rational {
-    type Output = Self;
-    fn div(self, rhs: Self) -> Self::Output {
-        Rational::new(self.n * rhs.d as i32, self.d as i32 * rhs.n)
-    }
-}
-
-impl ops::BitXor<i32> for Rational {
-    type Output = Self;
-    fn bitxor(self, exp: i32) -> Self {
-        exponentiate(if exp < 0 { Rational::ONE / self } else { self }, 
-                     exp.unsigned_abs(), Rational::ONE)
-    }
-}
-
-
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 struct Exponential {
@@ -269,15 +140,15 @@ impl ops::Add for Scalar {
         match (self, rhs) {
             (Scalar(S::Rational(lhs)), Scalar(S::Rational(rhs))) => Scalar(S::Rational(lhs + rhs)),
             (Scalar(S::Sum(lhs)), Scalar(S::Sum(rhs))) => {
-                let mut lhs: VecDeque<Scalar> = VecDeque::from(lhs);
-                let mut rhs: VecDeque<Scalar> = VecDeque::from(rhs);
                 let mut new_terms: Vec<Scalar> = Vec::with_capacity(lhs.len() + rhs.len());
-                while let (Some(lhs_next), Some(rhs_next)) = (lhs.front(), rhs.front()) {
+                let mut lhs = lhs.into_iter().peekable();
+                let mut rhs = rhs.into_iter().peekable();
+                while let (Some(lhs_next), Some(rhs_next)) = (lhs.peek(), rhs.peek()) {
                     match (lhs_next, rhs_next) {
                         // Each sum will only have up to one rational term
                         (&Scalar(S::Rational(lhs_next)), &Scalar(S::Rational(rhs_next))) => {
-                            lhs.pop_front();
-                            rhs.pop_front();
+                            lhs.next();
+                            rhs.next();
                             let rat_sum = lhs_next + rhs_next;
                             if rat_sum != Rational::ZERO {
                                 new_terms.push(Scalar(S::Rational(rat_sum)));
@@ -285,15 +156,15 @@ impl ops::Add for Scalar {
                         }
                         (lhs_next, rhs_next) => {
                             new_terms.push(
-                                if *lhs_next < *rhs_next { lhs.pop_front() }
-                                else { rhs.pop_front() }
-                                    .expect("term should not be empty")
+                                if *lhs_next < *rhs_next { lhs.next() }
+                                else { rhs.next() }
+                                    .unwrap()
                             );
                         }
                     }
                 }
-                new_terms.append(&mut Vec::from(lhs));
-                new_terms.append(&mut Vec::from(rhs));
+                new_terms.extend(lhs);
+                new_terms.extend(rhs);
                 //println!("Final sum: {:?}", new_terms);
                 Scalar(S::Sum(new_terms).correct_form())
             }
@@ -318,31 +189,29 @@ impl ops::AddAssign for Scalar {
 impl ops::Mul for Scalar {
     type Output = Self;
     fn mul(self, rhs: Self) -> Self::Output {
-        const EXPECT_ERR: &str = "Factor does not exist";
-
         match (self, rhs) {
             (Scalar(S::Rational(lhs)), Scalar(S::Rational(rhs))) => Scalar(S::Rational(lhs * rhs)),
             (Scalar(S::Product(lhs)), Scalar(S::Product(rhs))) => {
-                let mut lhs: VecDeque<Exponential> = VecDeque::from(lhs);
-                let mut rhs: VecDeque<Exponential> = VecDeque::from(rhs);
                 let mut new_factors: Vec<Exponential> = Vec::with_capacity(lhs.len() + rhs.len());
-                while let (Some(lhs_next), Some(rhs_next)) = (lhs.front(), rhs.front()) {
+                let mut lhs = lhs.into_iter().peekable();
+                let mut rhs = rhs.into_iter().peekable();
+                while let (Some(lhs_next), Some(rhs_next)) = (lhs.peek(), rhs.peek()) {
                     let order = (lhs_next.b).cmp(&rhs_next.b);
                     match order {
                         Ordering::Equal => {
                             let exp = lhs_next.e + rhs_next.e;
-                            let base = rhs.pop_front().expect(EXPECT_ERR).b;
-                            lhs.pop_front();
+                            let base = rhs.next().unwrap().b;
+                            lhs.next();
                             if base != -Rational::ONE && exp != Rational::ZERO {
                                 new_factors.push(Exponential { b: base, e: exp });
                             }
                         }
-                        Ordering::Less => new_factors.push(lhs.pop_front().expect(EXPECT_ERR)),
-                        Ordering::Greater => new_factors.push(rhs.pop_front().expect(EXPECT_ERR))
+                        Ordering::Less => new_factors.push(lhs.next().unwrap()),
+                        Ordering::Greater => new_factors.push(rhs.next().unwrap())
                     }
                 }
-                new_factors.append(&mut Vec::from(lhs));
-                new_factors.append(&mut Vec::from(rhs));
+                new_factors.extend(lhs);
+                new_factors.extend(rhs);
                 Scalar(S::Product(new_factors).correct_form())
             }
             (Scalar::ZERO, _) | (_, Scalar::ZERO) => return Scalar::ZERO,
@@ -510,7 +379,7 @@ const RULES: [fn(&Scalar) -> Vec<Scalar>; 3] = [
                     let FactorIndex { t_idx: t_idx1, f_idx: f_idx1, exp: exp1} = indices[i];
                     for &FactorIndex { t_idx: t_idx2, f_idx: f_idx2, exp: exp2} in
                         &indices[(i + 1)..] {
-                        if (exp1.n < 0) == (exp2.n < 0) {
+                        if (exp1.numerator() < 0) == (exp2.numerator() < 0) {
                             let exp: Rational = if exp1.abs() < exp2.abs() { exp1 }
                                                 else { exp2 };
                             let mut new_terms: Vec<Scalar> = terms.clone();
@@ -545,14 +414,14 @@ const RULES: [fn(&Scalar) -> Vec<Scalar>; 3] = [
                            (&factors[index1], &factors[index2]) {
                         let e_ratio = *e2 / *e1;
                         // e2 = e1 * e_ratio
-                        if index1 != index2 && e_ratio.d == 1 {
+                        if index1 != index2 && e_ratio.denominator() == 1 {
                             let (b1, b2) = (*b1, *b2);
                             let e1 = *e1;
                             let mut other_factors = factors.clone();
                             other_factors.remove(index1);
                             other_factors.remove(if index2 < index1 { index2 } else {index2 - 1 });
                             distributions.push(Scalar(S::Product(other_factors).correct_form()) *
-                                               (Scalar(S::Rational(b1 * (b2 ^ e_ratio.n))) ^ e1));
+                                (Scalar(S::Rational(b1 * (b2 ^ e_ratio.numerator()))) ^ e1));
                         }
                     }
                     // Distribution
@@ -950,16 +819,16 @@ impl Scalar {
                     let new_terms: Vec<Scalar> = terms.into_iter()
                         .map(|term| collect_chains(term, sums, products)).collect();
                     sums.push(new_terms);
-                    Scalar(S::Variable(String::from(SUM_PREFIX) + 
-                        (sums.len() - 1).to_string().as_str()))
+                    Scalar::from(String::from(SUM_PREFIX) + 
+                        (sums.len() - 1).to_string().as_str())
                 }
                 Scalar(S::Product(factors)) => {
                     let new_factors = factors.into_iter().map(|factor| Exponential {
                         b: collect_chains(factor.b, sums, products), 
                         e: factor.e }).collect();
                     products.push(new_factors);
-                    Scalar(S::Variable(String::from(PRODUCT_PREFIX) + 
-                        (products.len() - 1).to_string().as_str()))
+                    Scalar::from(String::from(PRODUCT_PREFIX) + 
+                        (products.len() - 1).to_string().as_str())
                 }
                 x => x
             }
@@ -989,26 +858,36 @@ impl Scalar {
         };
 
         for i in 0..sums.len() {
-            for j in 0..sums.len() {
+            for j in (i + 1)..sums.len() {
                 // if terms contains sum, remove sum from terms and replace it with i
                 // if sum contains terms, remove terms from sum and replace it with *something*
                 let mut lhs = sums[i].iter().enumerate().peekable();
                 let mut rhs = sums[j].iter().enumerate().peekable();
-                let mut intersection: Vec<(usize, usize)> = 
+                let mut intersection_idcs: Vec<(usize, usize)> = 
                     Vec::with_capacity(usize::max(lhs.len(), rhs.len()));
                 while let (Some((lidx, lhs_next)), Some((ridx, rhs_next))) = 
                           (lhs.peek(), rhs.peek()) {
                     match lhs_next.cmp(rhs_next) {
                         Ordering::Equal => {
-                            intersection.push((*lidx, *ridx));
+                            intersection_idcs.push((*lidx, *ridx));
                             lhs.next();
                             rhs.next();
                         }
                         _ => {}
                     }
                 }
-                if intersection.len() > 1 {
-                    
+                if intersection_idcs.len() > 1 {
+                    let intersection: Vec<Scalar> = intersection_idcs.iter().map(|(lidx, ridx)| {
+                        sums[i].remove(*lidx);
+                        sums[j].remove(*ridx)
+                    }).collect();
+                    sums.push(intersection);
+                    let intersection_name = Scalar::from(String::from(SUM_PREFIX) + 
+                        (sums.len() - 1).to_string().as_str());
+                    let idx1 = sums[i].binary_search(&intersection_name).map_or_else(|x| x, |x| x);
+                    sums[i].insert(idx1, intersection_name.clone());
+                    let idx2 = sums[j].binary_search(&intersection_name).map_or_else(|x| x, |x| x);
+                    sums[j].insert(idx2, intersection_name);
                 }
             }
         }
