@@ -1,3 +1,6 @@
+#![feature(trait_alias)]
+#![feature(step_trait)]
+
 pub mod scal;
 pub mod ga;
 mod algebra_tools;
@@ -110,5 +113,14 @@ mod tests {
         let last_blade_idx = x_rot.num_blades() - 1;
         println!("x rotated, {} blades: {x_rot}", x_rot.num_blades());
         println!("rotor_test runtime: {watch} nanoseconds");
+    }
+
+    #[test]
+    fn root_test() {
+        let base = Rational::new(169, 64);
+        let exp = Rational::new(1, 2);
+        if let Some(root) = base ^ exp {
+            println!("{root}");
+        }
     }
 }

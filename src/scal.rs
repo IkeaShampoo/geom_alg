@@ -122,6 +122,13 @@ impl TryInto<Vec<Exponential>> for Scalar {
     }
 }
 
+impl AddIdentity for Scalar {
+    const ZERO: Scalar = Scalar(S::Rational(Rational::ZERO));
+}
+impl MulIdentity for Scalar {
+    const ONE: Scalar = Scalar(S::Rational(Rational::ONE));
+}
+
 impl PartialEq<Rational> for Scalar {
     fn eq(&self, other: &Rational) -> bool {
         *self == Scalar::from(*other)
@@ -531,9 +538,11 @@ struct ExprComplexity {
     num_terms: usize,
     num_factors: usize
 }
-impl ExprComplexity {
-    const ADD_IDENTITY: ExprComplexity = ExprComplexity { num_terms: 0, num_factors: 0 };
-    const MUL_IDENTITY: ExprComplexity = ExprComplexity { num_terms: 1, num_factors: 0 };
+impl AddIdentity for ExprComplexity {
+    const ZERO: ExprComplexity = ExprComplexity { num_terms: 0, num_factors: 0 };
+}
+impl MulIdentity for ExprComplexity {
+    const ONE: ExprComplexity = ExprComplexity { num_terms: 1, num_factors: 0 };
 }
 impl PartialOrd for ExprComplexity {
     fn partial_cmp(&self, rhs: &Self) -> Option<Ordering> {
@@ -660,31 +669,13 @@ impl Simplifier {
 
 
 
-#[inline(always)]
-fn add_all(size: usize, terms: impl Iterator<Item = Scalar>) -> Scalar {
-    merge_all(size, terms, |x, y| x + y, &Scalar::ZERO)
-}
-#[inline(always)]
-fn mul_all(size: usize, factors: impl Iterator<Item = Scalar>) -> Scalar {
-    merge_all(size, factors, |x, y| x * y, &Scalar::ONE)
-}
-#[inline(always)]
-fn mul_exp(factors: Vec<Exponential>) -> Scalar {
-    mul_all(factors.len(), factors.into_iter().map(|f| Scalar(S::from(f))))
-}
-
-
 pub struct FragmentedScalar {
     expr: Scalar,
     temp_vars: usize,
     subexprs: BTreeMap<Scalar, Scalar>
 }
 
-
 impl Scalar {
-    pub const ZERO: Scalar = Scalar(S::Rational(Rational::ZERO));
-    pub const ONE: Scalar = Scalar(S::Rational(Rational::ONE));
-
     pub fn mul_inv(self) -> Self {
         self ^ -Rational::ONE
     }
@@ -749,10 +740,10 @@ impl Scalar {
     fn cost(&self) -> ExprCost {
         match self {
             Scalar(S::Sum(terms)) => merge_seq(terms.iter().map(|term| term.cost()),
-                    |a, b| a + b, &ExprCost::ZERO) + 
+                    |a, b| a + b, ExprCost::ZERO) + 
                 ExprCost::new(terms.len() - 1, self.is_constant()),
             Scalar(S::Product(factors)) => merge_seq(factors.iter().map(|factor| factor.b.cost()),
-                    |a, b| a + b, &ExprCost::ZERO) + 
+                    |a, b| a + b, ExprCost::ZERO) + 
                 ExprCost::new(factors.len() - 1, self.is_constant()),
             _ => ExprCost::ZERO
         }
@@ -763,11 +754,11 @@ impl Scalar {
     fn complexity(&self) -> ExprComplexity {
         match self {
             Scalar(S::Sum(terms)) => merge_seq(terms.iter().map(|term| term.complexity()), 
-                |a, b| a + b, &ExprComplexity::ADD_IDENTITY),
+                |a, b| a + b, ExprComplexity::ZERO),
             Scalar(S::Product(factors)) => merge_seq(factors.iter()
                     .map(|factor| exponentiate(factor.b.complexity(), 
-                        factor.e.round_from_zero().unsigned_abs(), ExprComplexity::MUL_IDENTITY)),
-                |a, b| a * b, &ExprComplexity::MUL_IDENTITY),
+                        factor.e.round_from_zero().unsigned_abs())),
+                |a, b| a * b, ExprComplexity::ONE),
             _ => ExprComplexity { num_terms: 1, num_factors: 1 }
         }
     }
@@ -776,9 +767,36 @@ impl Scalar {
         Simplifier::simplify(self)
     }
 
-    pub fn zero_simplified(&self) -> Scalar {
+    pub fn is_zero(&self) -> bool {
+        type ExpSum = (Vec<Scalar>, Rational);
+        fn distribute((b1, e1): &ExpSum, (b2, e2): &ExpSum) -> ExpSum {
+            (merge_seq(b1.iter().map(|b1_term| b2.iter().map(|b2_term|
+                    (b1_term.clone() ^ (*e1 / *e2)) * b2_term.clone()).collect()),
+                |mut a, mut b| { a.append(&mut b); a },
+                Vec::new()),
+            *e2)
+        }
+        fn collect_terms(expr: &Scalar) -> Vec<Scalar> {
+            match expr {
+                Scalar(S::Sum(terms)) => merge_seq(terms.iter().map(|term| collect_terms(term)),
+                    |mut a, mut b| { a.append(&mut b); a }, Vec::new()),
+                Scalar(S::Product(factors)) => {
+                    let (terms, exp) = merge_all(factors.len(), 
+                        factors.iter().map(|factor| (collect_terms(&factor.b), factor.e)),
+                        |f1, f2| distribute(&f1, &f2), &(Vec::new(), Rational::ONE));
+                    if exp.denominator() == 1 {
+                        todo!()
+                    }
+                    else {
+                        vec![Scalar(S::Sum(terms)) ^ exp]
+                    }
+                }
+                x => todo!()
+            }
+        }
+
         let terms: BTreeMap<Scalar, Rational> = BTreeMap::new();
-        self.simplified()
+        false
     }
 
     pub fn fragment(self) -> FragmentedScalar {

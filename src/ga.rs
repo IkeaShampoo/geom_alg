@@ -115,12 +115,9 @@ impl ops::Add for MVec {
                 Ordering::Less => new_blades.push(lhs.next().unwrap()),
                 Ordering::Equal => {
                     let (lhs_next, rhs_next) = (lhs.next().unwrap(), rhs.next().unwrap());
-                    let new_blade = KBlade {
-                        n: lhs_next.n,
-                        c: (lhs_next.c + rhs_next.c).zero_simplified()
-                    };
-                    if new_blade.c != Scalar::ZERO {
-                        new_blades.push(new_blade);
+                    let coefficient = lhs_next.c + rhs_next.c;
+                    if !coefficient.is_zero() {
+                        new_blades.push(KBlade { n: lhs_next.n, c: coefficient });
                     }
                 }
                 Ordering::Greater => new_blades.push(rhs.next().unwrap())

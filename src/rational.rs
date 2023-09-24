@@ -1,4 +1,4 @@
-use super::algebra_tools::exponentiate;
+use super::algebra_tools::*;
 
 use std::cmp::Ordering;
 use std::{fmt, ops};
@@ -18,10 +18,14 @@ fn gcd(a: u32, b: u32) -> u32 {
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub struct Rational { n: i32, d: u32 }
 
-impl Rational {
-    pub const ZERO: Rational = Rational { n: 0, d: 1 };
-    pub const ONE: Rational = Rational { n: 1, d: 1 };
+impl AddIdentity for Rational {
+    const ZERO: Rational = Rational { n: 0, d: 1 };
+}
+impl MulIdentity for Rational {
+    const ONE: Rational = Rational { n: 1, d: 1 };
+}
 
+impl Rational {
     pub fn numerator(&self) -> i32 {
         self.n
     }
@@ -102,6 +106,11 @@ impl ops::Add for Rational {
                       (self.d * rhs.d) as i32)
     }
 }
+impl ops::AddAssign for Rational {
+    fn add_assign(&mut self, rhs: Self) {
+        *self = *self + rhs;
+    }
+}
 
 impl ops::Neg for Rational {
     type Output = Self;
@@ -116,11 +125,21 @@ impl ops::Sub for Rational {
                       (self.d * rhs.d) as i32)
     }
 }
+impl ops::SubAssign for Rational {
+    fn sub_assign(&mut self, rhs: Self) {
+        *self = *self - rhs;
+    }
+}
 
 impl ops::Mul for Rational {
     type Output = Self;
     fn mul(self, rhs: Self) -> Self::Output {
         Rational::new(self.n * rhs.n, (self.d * rhs.d) as i32)
+    }
+}
+impl ops::MulAssign for Rational {
+    fn mul_assign(&mut self, rhs: Self) {
+        *self = *self * rhs;
     }
 }
 impl ops::Div for Rational {
@@ -129,11 +148,30 @@ impl ops::Div for Rational {
         Rational::new(self.n * rhs.d as i32, self.d as i32 * rhs.n)
     }
 }
+impl ops::DivAssign for Rational {
+    fn div_assign(&mut self, rhs: Self) {
+        *self = *self / rhs;
+    }
+}
 
 impl ops::BitXor<i32> for Rational {
     type Output = Self;
     fn bitxor(self, exp: i32) -> Self {
         exponentiate(if exp < 0 { Rational::ONE / self } else { self }, 
-                     exp.unsigned_abs(), Rational::ONE)
+                     exp.unsigned_abs())
+    }
+}
+
+impl ops::BitXor<Rational> for Rational {
+    type Output = Option<Self>;
+    fn bitxor(self, exp: Rational) -> Self::Output {
+        match exp.d {
+            1 => Some(self ^ exp.n),
+            exp_d => match (root_i64(self.n as i64, exp_d), root_u64(self.d as u64, exp_d)) {
+                (None, _) | (_, None) => None,
+                (Some(n_root), Some(d_root)) => 
+                    Some(Rational { n: n_root as i32, d: d_root as u32, } ^ exp.n)
+            }
+        }
     }
 }
