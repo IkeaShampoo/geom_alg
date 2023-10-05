@@ -390,8 +390,7 @@ impl MVec {
     }
     pub fn with_name(name: &String, basis: &KBlade, max_grade: usize) -> Self {
         let template = MVec { blades: basis.n.iter().map(|e| KBlade::from(e.clone())).collect() };
-        merge_all(max_grade, (0..max_grade)
-                    .map(|i| template.clone().rename(&(i.to_string() + "_"))),
+        merge_all((0..max_grade).map(|i| template.clone().rename(&(i.to_string() + "_"))),
                   |a, b| a * b, &MVec { blades: Vec::new() }).rename(name)
     }
     pub fn reverse_mul_order(mut self) -> Self {

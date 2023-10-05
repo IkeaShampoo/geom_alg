@@ -157,8 +157,11 @@ impl ops::DivAssign for Rational {
 impl ops::BitXor<i32> for Rational {
     type Output = Self;
     fn bitxor(self, exp: i32) -> Self {
-        exponentiate(if exp < 0 { Rational::ONE / self } else { self }, 
-                     exp.unsigned_abs())
+        let b = if exp < 0 { Rational::ONE / self } else { self };
+        Rational { 
+            n: exponentiate(b.n, exp.unsigned_abs()), 
+            d: exponentiate(b.d, exp.unsigned_abs())
+        }
     }
 }
 
@@ -168,10 +171,43 @@ impl ops::BitXor<Rational> for Rational {
         match exp.d {
             1 => Some(self ^ exp.n),
             exp_d => match (root_i64(self.n as i64, exp_d), root_u64(self.d as u64, exp_d)) {
-                (None, _) | (_, None) => None,
-                (Some(n_root), Some(d_root)) => 
+                (None, _) | (Some(Err(_)), _) | (_, Err(_)) => None,
+                (Some(Ok(n_root)), Ok(d_root)) =>
                     Some(Rational { n: n_root as i32, d: d_root as u32, } ^ exp.n)
             }
+        }
+    }
+}
+
+impl Rational {
+    /// Simplifies a rational raised to another rational
+    /// into some root of a rational, returned as (rational, root index)
+    pub fn simplify_exp(self, exp: Self) -> Option<(Self, u32)> {
+        if exp.d == 1 {
+            Some((self ^ exp.n, 1))
+        }
+        else if (self.n < 0) && (exp.d & 1 == 0) {
+            None
+        }
+        else {
+            let sign = self.n.signum();
+            let mut root_index = exp.d;
+            let (mut n, mut d): (u64, u64) = (self.n.unsigned_abs() as u64, self.d as u64);
+            let mut unused_factors = 1;
+            loop {
+                match prime_factor(root_index) {
+                    Some(index_factor) => {
+                        root_index /= index_factor;
+                        match (root_u64(n, index_factor), root_u64(d, index_factor)) {
+                            (Ok(n_root), Ok(d_root)) => (n, d) = (n_root, d_root),
+                            _ => unused_factors *= index_factor
+                        }
+                    }
+                    None => break
+                }
+            }
+            Some((Rational { n: sign * n as i32, d: d as u32, } ^ exp.n, 
+                root_index * unused_factors))
         }
     }
 }
