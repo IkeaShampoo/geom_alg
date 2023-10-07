@@ -3,10 +3,23 @@
 
 pub mod scal;
 pub mod ga;
-//pub mod simpl;
+pub mod simpl;
 mod algebra_tools;
 mod benchmarking;
 mod rational;
+
+/* TODO
+ *  Rewrite Exponential::ord() to order exponentiated rationals firstly by whether they are rational
+ *      and secondly by the magnitude of their exponents
+ *  Rewrite Sum::add() to combine differently-rational-scaled copies of the same expression
+ *  Rewrite Product::mul() to combine rationals exponentiated to powers of the same magnitude
+ *  Give Scalar::is_zero() ability to put exponentiated rationals in a canonical form
+ *  Move Scalar::fragment() to another module
+ *  Make a second version of Simplifier that doesn't cap complexity
+ *  Improve on the distribution rule for simplification
+ *  Place limits on simplification runtime
+ *  Give options to limit simplification rules
+ */
 
 #[cfg(test)]
 mod tests {

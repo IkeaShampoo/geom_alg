@@ -2,44 +2,14 @@ use super::{scal::*, rational::*, algebra_tools::*};
 use std::cmp::Ordering;
 use std::{fmt, ops};
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
-impl Scalar {
-    fn cost(&self) -> ExprCost {
-        match self {
-            Scalar(S::Sum(terms)) => merge_seq(terms.iter().map(|term| term.cost()),
-                    |a, b| a + b, ExprCost::ZERO) + 
-                ExprCost::new(terms.len() - 1, self.is_constant()),
-            Scalar(S::Product(factors)) => merge_seq(factors.iter().map(|factor| factor.b.cost()),
-                    |a, b| a + b, ExprCost::ZERO) + 
-                ExprCost::new(factors.len() - 1, self.is_constant()),
-            _ => ExprCost::ZERO
-        }
-    }
-
-    // Provides an upper bound on the complexity of any expression that could be derived from 
-    //  this expression without the addition of new term/factor pairs that cancel each other out
-    fn complexity(&self) -> ExprComplexity {
-        match self {
-            Scalar(S::Sum(terms)) => merge_seq(terms.iter().map(|term| term.complexity()), 
-                |a, b| a + b, ExprComplexity::ZERO),
-            Scalar(S::Product(factors)) => merge_seq(factors.iter()
-                    .map(|factor| exponentiate(factor.b.complexity(), 
-                        factor.e.round_from_zero().unsigned_abs())),
-                |a, b| a * b, ExprComplexity::ONE),
-            _ => ExprComplexity { num_terms: 1, num_factors: 1 }
-        }
-    }
-}
-
-/*
-Access required:
-    
- */
 const RULES: [fn(&Scalar) -> Vec<Scalar>; 3] = [
     // Factorization
-    |x| match x {
-        Scalar(S::Sum(terms)) => {
+    |x| match x.as_ref() {
+        ScalarInner::Sum(sum) => {
+            let terms = sum.ref_terms();
+
             #[derive(Copy, Clone)]
             struct FactorIndex {
                 t_idx: usize,
@@ -60,13 +30,16 @@ const RULES: [fn(&Scalar) -> Vec<Scalar>; 3] = [
 
             let mut factors_indices: FactorIndexer = BTreeMap::new();
             for i in 0..terms.len() {
-                match &terms[i] {
-                    Scalar(S::Product(factors)) =>
+                match &terms[i].as_ref() {
+                    ScalarInner::Product(prod) => {
+                        let factors = prod.ref_factors();
                         for j in 0..factors.len() {
                             let factor = &factors[j];
-                            index_factor(&mut factors_indices, &factor.b, factor.e, i, j);
+                            index_factor(&mut factors_indices, factor.ref_base(), 
+                                *factor.ref_exponent(), i, j);
                         }
-                    x => index_factor(&mut factors_indices, &x, Rational::ONE, i, 0)
+                    }
+                    x => index_factor(&mut factors_indices, &terms[i], Rational::ONE, i, 0)
                 }
             }
 
@@ -75,16 +48,12 @@ const RULES: [fn(&Scalar) -> Vec<Scalar>; 3] = [
                 for i in 0..(indices.len() - 1) {
 
                     fn remove_factor(term: Scalar, factor_index: usize, exp: Rational) -> Scalar {
-                        match term {
-                            Scalar(S::Product(mut factors)) => {
-                                if factors[factor_index].e == exp {
-                                    factors.remove(factor_index);
-                                }
-                                else {
-                                    factors[factor_index].e = factors[factor_index].e - exp;
-                                }
-                                Scalar(S::Product(factors).correct_form())
-                            }
+                        match term.as_ref() {
+                            ScalarInner::Product(prod) => {
+                                let to_remove = Scalar::from(prod.ref_factors()[factor_index]
+                                    .clone()) ^ exp;
+                                term / to_remove
+                            },
                             _ => Scalar::ONE
                         }
                     }
@@ -95,14 +64,13 @@ const RULES: [fn(&Scalar) -> Vec<Scalar>; 3] = [
                         if (exp1.numerator() < 0) == (exp2.numerator() < 0) {
                             let exp: Rational = if exp1.abs() < exp2.abs() { exp1 }
                                                 else { exp2 };
-                            let mut new_terms: Vec<Scalar> = terms.clone();
-                            let term1 = new_terms.remove(t_idx1);
-                            let term2 = new_terms.remove(
+                            let mut new_terms = sum.clone();
+                            let term1 = new_terms.remove_term(t_idx1).unwrap();
+                            let term2 = new_terms.remove_term(
                                 if t_idx2 < t_idx1 { t_idx2 }
-                                else { t_idx2 - 1 }
-                            );
+                                else { t_idx2 - 1 }).unwrap();
 
-                            factorizations.push(Scalar(S::Sum(new_terms).correct_form()) +
+                            factorizations.push(Scalar::from(new_terms) +
                                                 (factor.clone() ^ exp) *
                                                 (remove_factor(term1, f_idx1, exp) +
                                                  remove_factor(term2, f_idx2, exp)));
@@ -116,61 +84,49 @@ const RULES: [fn(&Scalar) -> Vec<Scalar>; 3] = [
     },
 
     // Distribution and combination of rational-based exponentials
-    |x| match x {
-        Scalar(S::Product(factors)) => {
+    |x| match x.as_ref() {
+        ScalarInner::Product(prod) => {
+            let factors = prod.ref_factors();
+
             let mut distributions: Vec<Scalar> = Vec::new();
             for index1 in 0..factors.len() {
                 for index2 in 0..factors.len() {
-                    // Combination of rational-based exponentials
-                    if let (Exponential { b: Scalar(S::Rational(b1)), e: e1 },
-                            Exponential { b: Scalar(S::Rational(b2)), e: e2 }) =
-                           (&factors[index1], &factors[index2]) {
-                        let e_ratio = *e2 / *e1;
-                        // e2 = e1 * e_ratio
-                        if index1 != index2 && e_ratio.denominator() == 1 {
-                            let (b1, b2) = (*b1, *b2);
-                            let e1 = *e1;
-                            let mut other_factors = factors.clone();
-                            other_factors.remove(index1);
-                            other_factors.remove(if index2 < index1 { index2 } else {index2 - 1 });
-                            distributions.push(Scalar(S::Product(other_factors).correct_form()) *
-                                (Scalar(S::Rational(b1 * (b2 ^ e_ratio.numerator()))) ^ e1));
-                        }
-                    }
                     // Distribution
-                    else if let Scalar(S::Sum(_)) = &(factors[index2].b) {
+                    if let ScalarInner::Sum(_) = factors[index2].ref_base().as_ref() {
                         fn distribute(distributions: &mut Vec<Scalar>, other_factors: Scalar,
-                                      terms: Vec<Scalar>, terms_exp: Rational,
-                                      distributed: Scalar) {
-                            for i in 0..terms.len() {
+                                      terms: Sum, terms_exp: Rational, distributed: Scalar) {
+                            for i in 0..terms.ref_terms().len() {
                                 let mut other_terms = terms.clone();
-                                let term = other_terms.remove(i);
+                                let term = other_terms.remove_term(i).unwrap();
                                 distributions.push(other_factors.clone() * ((
                                     distributed.clone() * term +
-                                    distributed.clone() * Scalar(S::Sum(other_terms).correct_form())
+                                    distributed.clone() * Scalar::from(other_terms)
                                 ) ^ terms_exp));
                             }
                         }
 
                         // distribute factor into another factor
-                        if factors[index1].e == factors[index2].e && index1 != index2 {
-                            let mut other_factors = factors.clone();
-                            let distributed = Scalar(S::from(other_factors.remove(index1)));
-                            let (terms, terms_exp) = match other_factors.remove(
+                        if *factors[index1].ref_exponent() == *factors[index2].ref_exponent() 
+                                && index1 != index2 {
+                            let mut other_factors = prod.clone();
+                            let distributed = other_factors.remove_factor(index1)
+                                .unwrap().into_base();
+                            let (terms_exp, terms) = match other_factors.remove_factor(
                                 if index2 < index1 { index2 }
                                 else { index2 - 1 }
-                            ) {
-                                Exponential { b: Scalar(S::Sum(terms)), e: exp} => (terms, exp),
-                                not_a_sum => panic!("{not_a_sum} is not a sum")
-                            };
+                            ).unwrap() { factor => (
+                                *factor.ref_exponent(), 
+                                Sum::from(factor.into_base())) };
 
-                            distribute(&mut distributions,
-                                       Scalar(S::Product(other_factors).correct_form()),
+                            distribute(&mut distributions, Scalar::from(other_factors),
                                        terms, terms_exp, distributed);
                         }
-
+                        
+                        /*
                         // distribute factor into itself
-                        if (if index1 == index2 { factors[index2].e - factors[index1].e }
+                        if (if index1 == index2 { 
+                                factors[index2].e - factors[index1].e
+                            }
                             else { factors[index2].e }) >= Rational::ONE {
 
                             fn remove_factors(factors: &mut Vec<Exponential>,
@@ -192,6 +148,7 @@ const RULES: [fn(&Scalar) -> Vec<Scalar>; 3] = [
 
                             let mut new_factors: Vec<Exponential> = factors.clone();
                         }
+                         */
                     }
                 }
             }
@@ -201,8 +158,8 @@ const RULES: [fn(&Scalar) -> Vec<Scalar>; 3] = [
     },
 
     // (Not Started) Exponentiation of rational-based exponentials
-    |x| match x {
-        Scalar(S::Product(factors)) => {
+    |x| match x.as_ref() {
+        ScalarInner::Product(prod) => {
             Vec::new()
         }
         _ => Vec::new()
@@ -284,6 +241,37 @@ impl fmt::Display for ExprComplexity {
 
 
 
+impl Scalar {
+    fn cost(&self) -> ExprCost {
+        match self.as_ref() {
+            ScalarInner::Sum(s) => merge_seq(s.ref_terms().iter().map(|term| term.cost()),
+                    |a, b| a + b, ExprCost::ZERO) + 
+                ExprCost::new(s.ref_terms().len() - 1, self.is_constant()),
+            ScalarInner::Product(p) => merge_seq(p.ref_factors().iter()
+                        .map(|factor| factor.ref_base().cost()),
+                    |a, b| a + b, ExprCost::ZERO) + 
+                ExprCost::new(p.ref_factors().len() - 1, self.is_constant()),
+            _ => ExprCost::ZERO
+        }
+    }
+
+    // Provides an upper bound on the complexity of any expression that could be derived from 
+    //  this expression without the addition of new term/factor pairs that cancel each other out
+    fn complexity(&self) -> ExprComplexity {
+        match self.as_ref() {
+            ScalarInner::Sum(s) => merge_seq(s.ref_terms().iter().map(|term| term.complexity()), 
+                |a, b| a + b, ExprComplexity::ZERO),
+            ScalarInner::Product(p) => merge_seq(p.ref_factors().iter()
+                    .map(|factor| exponentiate(factor.ref_base().complexity(), 
+                        factor.ref_exponent().round_from_zero().unsigned_abs())),
+                |a, b| a * b, ExprComplexity::ONE),
+            _ => ExprComplexity { num_terms: 1, num_factors: 1 }
+        }
+    }
+}
+
+
+
 struct Simplifier {
     simplest: (Scalar, ExprCost),
     territory: BTreeSet<Scalar>,
@@ -293,7 +281,7 @@ struct Simplifier {
 }
 
 impl Simplifier {
-    fn simplify(expr: &Scalar) -> Scalar {
+    pub fn simplify(expr: &Scalar) -> Scalar {
         let mut simplifier = Simplifier {
             simplest: (expr.clone(), expr.cost()),
             territory: BTreeSet::new(),
@@ -347,23 +335,23 @@ impl Simplifier {
         for rule in &RULES {
             transformed.append(&mut (*rule)(expr));
         }
-        match expr {
-            Scalar(S::Sum(terms)) => {
-                for (i, term) in terms.iter().enumerate() {
+        match expr.as_ref() {
+            ScalarInner::Sum(terms) => {
+                for (i, term) in terms.ref_terms().iter().enumerate() {
                     for trans_term in Simplifier::derive(term) {
-                        let mut new_terms: Vec<Scalar> = terms.clone();
-                        new_terms.remove(i);
-                        transformed.push(Scalar(S::Sum(new_terms).correct_form()) + trans_term);
+                        let mut new_terms = terms.clone();
+                        new_terms.remove_term(i);
+                        transformed.push(Scalar::from(new_terms) + trans_term);
                     }
                 }
             }
-            Scalar(S::Product(factors)) => {
-                for (i, factor) in factors.iter().enumerate() {
-                    for trans_factor in Simplifier::derive(&factor.b) {
-                        let mut new_factors: Vec<Exponential> = factors.clone();
-                        new_factors.remove(i);
-                        transformed.push(Scalar(S::Product(new_factors).correct_form()) *
-                                         (trans_factor ^ factor.e));
+            ScalarInner::Product(factors) => {
+                for (i, factor) in factors.ref_factors().iter().enumerate() {
+                    for trans_factor in Simplifier::derive(factor.ref_base()) {
+                        let mut new_factors = factors.clone();
+                        new_factors.remove_factor(i);
+                        transformed.push(Scalar::from(new_factors) * 
+                            (trans_factor ^ *factor.ref_exponent()));
                     }
                 }
             }
