@@ -3,7 +3,7 @@ use super::scal::*;
 
 use std::cmp::{max, min, Ordering};
 use std::collections::VecDeque;
-use std::{fmt, mem, ops};
+use std::{fmt, ops};
 
 /// Canonical basis vector
 #[derive(Clone, Eq)]
