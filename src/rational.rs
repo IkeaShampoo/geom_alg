@@ -181,7 +181,8 @@ impl ops::BitXor<Rational> for Rational {
 
 impl Rational {
     /// Simplifies a rational raised to another rational
-    /// into some root of a rational, returned as (rational, root index)
+    /// into some root of a rational, returned as (rational, root index).
+    /// Returns None if the root does not exist
     pub fn simplify_exp(self, exp: Self) -> Option<(Self, u32)> {
         if exp.d == 1 {
             Some((self ^ exp.n, 1))

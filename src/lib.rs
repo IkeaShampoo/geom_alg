@@ -9,10 +9,9 @@ mod benchmarking;
 mod rational;
 
 /* TODO
- *  Rewrite Exponential::ord() to order exponentiated rationals firstly by whether they are rational
- *      and secondly by the magnitude of their exponents
- *  Rewrite Sum::add() to combine differently-rational-scaled copies of the same expression
- *  Rewrite Product::mul() to combine rationals exponentiated to powers of the same magnitude
+ *  In order to ensure Product::mul's correctness, don't simplify rational-based exponentials
+ *  In Product::mul: Make sure same-base rational-based exponents are also combined
+ *  Test Scalar::{add, mul} and Exponential::new
  *  Give Scalar::is_zero() ability to put exponentiated rationals in a canonical form
  *  Move Scalar::fragment() to another module
  *  Make a second version of Simplifier that doesn't cap complexity

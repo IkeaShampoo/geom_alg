@@ -9,6 +9,37 @@ pub struct Exponential {
     b: Scalar, e: Rational
 }
 impl Exponential {
+    const ZERO: Exponential = Exponential { b: Scalar::ZERO, e: Rational::ONE };
+    const ONE: Exponential = Exponential { b: Scalar::ONE, e: Rational::ONE };
+    pub fn new(base: Scalar, exp: Rational) -> Exponential {
+        match exp {
+            Rational::ZERO => Exponential::ONE,
+            Rational::ONE => Exponential { b: base, e: Rational::ONE },
+            _ => match base.into() {
+                S::Rational(Rational::ZERO) => Exponential::ZERO,
+                S::Rational(Rational::ONE) => Exponential::ONE,
+                S::Rational(rat) => match rat.simplify_exp(exp)
+                        .map_or((rat, exp), |(simpl_base, root_index)| 
+                            (simpl_base, Rational::new(1, root_index as i32))) {
+                    (b, e) => Exponential { b: Scalar::from(b), e }
+                }
+                S::Product(Product(mut factors)) => match factors.len() {
+                    1 => match factors.pop().unwrap() {
+                        Exponential { b, e } => Exponential::new(b, e + exp)
+                    }
+                    // Exponentiation won't change the ordering of absolute values of the exponents
+                    // of the rational-based exponentials, and the signs shouldn't matter as long
+                    // as the Rational::simplify_exp is working
+                    _ => Exponential { 
+                        b: Scalar::from(Product(factors.into_iter()
+                            .map(|factor| Exponential::new(factor.b, factor.e * exp))
+                            .collect())),
+                        e: Rational::ONE }
+                }
+                x => Exponential { b: Scalar(x), e: exp }
+            }
+        }
+    }
     pub fn into_base(self) -> Scalar {
         self.b
     }
@@ -20,11 +51,25 @@ impl Exponential {
     }
 }
 
+/// Rational-based exponentials are ordered firstly by the exponent's absolute value, 
+/// secondarily by exponent's sign, and thirdly by the base.
+/// All other exponentials, following the rational-based ones, are ordered firstly by base
+/// and secondarily by exponent.
 impl Ord for Exponential {
     fn cmp(&self, other: &Self) -> Ordering {
-        match self.b.cmp(&other.b) {
-            Ordering:: Equal => self.e.cmp(&other.e),
-            order => order
+        match (&self.b, &other.b) {
+            (Scalar(S::Rational(_)), Scalar(S::Rational(_))) => 
+                match self.e.abs().cmp(&other.e.abs()) {
+                    Ordering::Equal => match self.e.numerator().cmp(&other.e.numerator()) {
+                        Ordering::Equal => self.b.cmp(&other.b),
+                        order => order
+                    }
+                    order => order
+                }
+            _ => match self.b.cmp(&other.b) {
+                Ordering::Equal => self.e.cmp(&other.e),
+                order => order
+            }
         }
     }
 }
@@ -58,29 +103,63 @@ impl Sum {
     }
 }
 
+fn try_sep_coef(prod: &mut Product, i: usize) -> Option<Rational> {
+    if let Some(Exponential { b: Scalar(S::Rational(rat_coef)), e: Rational::ONE }) =
+            prod.ref_factors().get(i) {
+        let rat_coef = *rat_coef;
+        prod.remove_factor(i);
+        Some(rat_coef)
+    }
+    else { None } 
+}
+fn sep_coef(expr: Scalar) -> (Rational, Scalar) {
+    match expr.into() {
+        S::Product(mut prod) => {
+            let i = prod.ref_factors().binary_search(&Exponential::ONE).map_or_else(|i| i, |i| i);
+            if let Some(rat_coef) = try_sep_coef(&mut prod, i) {
+                return (rat_coef, Scalar::from(prod));
+            } 
+            if let Some(rat_coef) = try_sep_coef(&mut prod, i + 1) {
+                return (rat_coef, Scalar::from(prod));
+            }
+            if i > 0 {
+                if let Some(rat_coef) = try_sep_coef(&mut prod, i - 1) {
+                    return (rat_coef, Scalar::from(prod));
+                }
+            }
+            (Rational::ONE, Scalar(S::Product(prod)))
+        }
+        S::Rational(coeff) => (coeff, Scalar::ONE),
+        x => (Rational::ONE, Scalar(x))
+    }
+}
+
+// TODO: fix this. it's for sure slow as shit
 impl Sum {
     fn add(self, rhs: Self) -> Self {
-        let mut lhs = self.into_terms().into_iter().peekable();
-        let mut rhs = rhs.into_terms().into_iter().peekable();
+        let mut lhs = self.into_terms().into_iter().map(|t| sep_coef(t)).peekable();
+        let mut rhs = rhs.into_terms().into_iter().map(|t| sep_coef(t)).peekable();
         let mut new_terms: Vec<Scalar> = Vec::with_capacity(lhs.len() + rhs.len());
-        while let (Some(lhs_next), Some(rhs_next)) = (lhs.peek(), rhs.peek()) {
-            match (lhs_next, rhs_next) {
-                // Each sum will only have up to one rational term
-                (&Scalar(S::Rational(lhs_next)), &Scalar(S::Rational(rhs_next))) => {
-                    lhs.next();
+        while let (Some((lhs_coef, lhs_next)), Some((rhs_coef, rhs_next))) =
+                (lhs.peek(), rhs.peek()) {
+            if lhs_next == lhs_next {
+                let new_coef = *lhs_coef + *rhs_coef;
+                if new_coef != Rational::ZERO {
+                    let (_, lhs_next) = lhs.next().unwrap();
                     rhs.next();
-                    let rat_sum = lhs_next + rhs_next;
-                    if rat_sum != Rational::ZERO {
-                        new_terms.push(Scalar::from(rat_sum));
-                    }
+                    new_terms.push(Scalar::from(new_coef) * lhs_next);
                 }
-                (lhs_next, rhs_next) => new_terms.push(
+            }
+            else {
+                new_terms.push(match
                     if *lhs_next < *rhs_next { lhs.next() }
-                    else { rhs.next() } .unwrap())
+                    else { rhs.next() } .unwrap() {
+                        (coef, next) => Scalar(S::Rational(coef)) * next
+                    });
             }
         }
-        new_terms.extend(lhs);
-        new_terms.extend(rhs);
+        new_terms.extend(lhs.map(|(coef, next)| Scalar(S::Rational(coef)) * next));
+        new_terms.extend(rhs.map(|(coef, next)| Scalar(S::Rational(coef)) * next));
         Sum(new_terms)
     }
 }
@@ -118,18 +197,35 @@ impl Product {
         let mut rhs = rhs.into_factors().into_iter().peekable();
         let mut new_factors: Vec<Exponential> = Vec::with_capacity(lhs.len() + rhs.len());
         while let (Some(lhs_next), Some(rhs_next)) = (lhs.peek(), rhs.peek()) {
-            let order = (lhs_next.b).cmp(&rhs_next.b);
-            match order {
-                Ordering::Equal => {
-                    let exp = lhs_next.e + rhs_next.e;
-                    let base = rhs.next().unwrap().b;
-                    lhs.next();
-                    if base != -Rational::ONE && exp != Rational::ZERO {
-                        new_factors.push(Exponential { b: base, e: exp });
+            if let (&S::Rational(lhs_rat), &S::Rational(rhs_rat)) = 
+                    (lhs_next.ref_base().as_ref(), rhs_next.ref_base().as_ref()) {
+                // Assuming Exponential::new() is doing its thing, all rational-based exponentials
+                // should have positive exponents, so it's unnecessary to compare both the absolute
+                // value and sign of the exponent.
+                match lhs_next.e.cmp(&rhs_next.e) {
+                    Ordering::Equal => {
+                        new_factors.push(Exponential::new(
+                            Scalar::from(lhs_rat * rhs_rat), 
+                            lhs_next.e));
+                        lhs.next(); rhs.next();
                     }
+                    Ordering::Less => new_factors.push(lhs.next().unwrap()),
+                    Ordering::Greater => new_factors.push(rhs.next().unwrap())
                 }
-                Ordering::Less => new_factors.push(lhs.next().unwrap()),
-                Ordering::Greater => new_factors.push(rhs.next().unwrap())
+            }
+            else {
+                match (lhs_next.b).cmp(&rhs_next.b) {
+                    Ordering::Equal => {
+                        let exp = lhs_next.e + rhs_next.e;
+                        let base = rhs.next().unwrap().b;
+                        lhs.next();
+                        if exp != Rational::ZERO {
+                            new_factors.push(Exponential::new(base, exp));
+                        }
+                    }
+                    Ordering::Less => new_factors.push(lhs.next().unwrap()),
+                    Ordering::Greater => new_factors.push(rhs.next().unwrap())
+                }
             }
         }
         new_factors.extend(lhs);
@@ -180,7 +276,7 @@ impl From<Rational> for Scalar {
 impl From<Exponential> for Scalar {
     fn from(exponential: Exponential) -> Self {
         match exponential.e {
-            Rational::ZERO => Scalar::ONE,
+            //Rational::ZERO => Scalar::ONE, // shouldn't happen
             Rational::ONE => exponential.b,
             _ => if exponential.b == Rational::ONE { Scalar::ONE }
                  else { Scalar(S::Product(Product(vec![exponential]))) }
@@ -289,21 +385,7 @@ impl ops::MulAssign for Scalar {
 impl ops::BitXor<Rational> for Scalar {
     type Output = Self;
     fn bitxor(self, exp: Rational) -> Self::Output {
-        match exp {
-            Rational::ZERO => Scalar::ONE,
-            Rational::ONE => self,
-            _ => match self {
-                Scalar::ONE => Scalar::ONE,
-                Scalar(S::Product(Product(mut factors))) => {
-                    for factor in &mut factors {
-                    // can't change term order or multiplicatively invert terms
-                        (*factor).e = (*factor).e * exp;
-                    }
-                    Scalar(S::Product(Product(factors)))
-                }
-                x => Scalar(S::Product(Product(vec![Exponential { b: x, e: exp }])))
-            }
-        }
+        Scalar::from(Exponential::new(self, exp))
     }
 }
 
@@ -453,7 +535,7 @@ impl Scalar {
             match expr.as_ref() {
                 S::Sum(s) => add_all(s.ref_terms().iter().map(|term| distribute_all(term))),
                 S::Product(p) => merge_all(p.ref_factors().iter().map(
-                    |Exponential{b: terms, e: exp}|
+                    |Exponential { b: terms, e: exp }|
                     if exp.numerator() > 0 && exp.denominator() == 1 {
                         expand(distribute_all(&terms), exp.numerator().unsigned_abs())
                     } 
