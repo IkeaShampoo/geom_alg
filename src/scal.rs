@@ -11,6 +11,14 @@ pub struct Exponential {
 impl Exponential {
     const ZERO: Exponential = Exponential { b: Scalar::ZERO, e: Rational::ONE };
     const ONE: Exponential = Exponential { b: Scalar::ONE, e: Rational::ONE };
+    fn new_rational_based(base: Rational, exp: Rational) -> Exponential {
+        let simpl_base = base ^ exp.numerator();
+        let simpl_exp = Rational::new(1, exp.denominator() as i32);
+        match simpl_base ^ simpl_exp {
+            Some(simpl_rat) => Exponential { b: Scalar::from(simpl_rat), e: Rational::ONE },
+            None => Exponential { b: Scalar::from(simpl_base), e: simpl_exp }
+        }
+    }
     pub fn new(base: Scalar, exp: Rational) -> Exponential {
         match exp {
             Rational::ZERO => Exponential::ONE,
@@ -18,18 +26,11 @@ impl Exponential {
             _ => match base.into() {
                 S::Rational(Rational::ZERO) => Exponential::ZERO,
                 S::Rational(Rational::ONE) => Exponential::ONE,
-                S::Rational(rat) => match rat.simplify_exp(exp)
-                        .map_or((rat, exp), |(simpl_base, root_index)| 
-                            (simpl_base, Rational::new(1, root_index as i32))) {
-                    (b, e) => Exponential { b: Scalar::from(b), e }
-                }
+                S::Rational(rat) => Exponential::new_rational_based(rat, exp),
                 S::Product(Product(mut factors)) => match factors.len() {
                     1 => match factors.pop().unwrap() {
                         Exponential { b, e } => Exponential::new(b, e + exp)
                     }
-                    // Exponentiation won't change the ordering of absolute values of the exponents
-                    // of the rational-based exponentials, and the signs shouldn't matter as long
-                    // as the Rational::simplify_exp is working
                     _ => Exponential { 
                         b: Scalar::from(Product(factors.into_iter()
                             .map(|factor| Exponential::new(factor.b, factor.e * exp))
@@ -51,19 +52,16 @@ impl Exponential {
     }
 }
 
-/// Rational-based exponentials are ordered firstly by the exponent's absolute value, 
-/// secondarily by exponent's sign, and thirdly by the base.
+/// Rational-based exponentials are ordered firstly by the exponent's denominator, and 
+/// secondly by the base. All RBEs' exponents should have the same numerator (1).
 /// All other exponentials, following the rational-based ones, are ordered firstly by base
 /// and secondarily by exponent.
 impl Ord for Exponential {
     fn cmp(&self, other: &Self) -> Ordering {
         match (&self.b, &other.b) {
             (Scalar(S::Rational(_)), Scalar(S::Rational(_))) => 
-                match self.e.abs().cmp(&other.e.abs()) {
-                    Ordering::Equal => match self.e.numerator().cmp(&other.e.numerator()) {
-                        Ordering::Equal => self.b.cmp(&other.b),
-                        order => order
-                    }
+                match self.e.denominator().cmp(&other.e.denominator()) {
+                    Ordering::Equal => self.b.cmp(&other.b),
                     order => order
                 }
             _ => match self.b.cmp(&other.b) {
@@ -195,22 +193,29 @@ impl Product {
     fn mul(self, rhs: Self) -> Self {
         let mut lhs = self.into_factors().into_iter().peekable();
         let mut rhs = rhs.into_factors().into_iter().peekable();
-        let mut new_factors: Vec<Exponential> = Vec::with_capacity(lhs.len() + rhs.len());
+        let mut rat_coef = Rational::ONE;
+        let mut new_factors1: Vec<Exponential> = Vec::with_capacity(lhs.len() + rhs.len());
+        let mut new_factors2: Vec<Exponential> = Vec::new();
         while let (Some(lhs_next), Some(rhs_next)) = (lhs.peek(), rhs.peek()) {
             if let (&S::Rational(lhs_rat), &S::Rational(rhs_rat)) = 
                     (lhs_next.ref_base().as_ref(), rhs_next.ref_base().as_ref()) {
-                // Assuming Exponential::new() is doing its thing, all rational-based exponentials
-                // should have positive exponents, so it's unnecessary to compare both the absolute
-                // value and sign of the exponent.
-                match lhs_next.e.cmp(&rhs_next.e) {
+                match lhs_next.e.denominator().cmp(&rhs_next.e.denominator()) {
                     Ordering::Equal => {
-                        new_factors.push(Exponential::new(
-                            Scalar::from(lhs_rat * rhs_rat), 
-                            lhs_next.e));
+                        let combined = Exponential::new_rational_based(
+                            lhs_rat * rhs_rat, lhs_next.e);
+                        if combined.e == Rational::ONE {
+                            rat_coef = rat_coef * match combined.b.as_ref() { 
+                                &S::Rational(x) => x,
+                                _ => panic!("wtf I thought this exponential was rational-based")
+                            };
+                        }
+                        else {
+                            new_factors1.push(combined);
+                        }
                         lhs.next(); rhs.next();
                     }
-                    Ordering::Less => new_factors.push(lhs.next().unwrap()),
-                    Ordering::Greater => new_factors.push(rhs.next().unwrap())
+                    Ordering::Less => new_factors1.push(lhs.next().unwrap()),
+                    Ordering::Greater => new_factors1.push(rhs.next().unwrap())
                 }
             }
             else {
@@ -220,17 +225,25 @@ impl Product {
                         let base = rhs.next().unwrap().b;
                         lhs.next();
                         if exp != Rational::ZERO {
-                            new_factors.push(Exponential::new(base, exp));
+                            new_factors2.push(Exponential::new(base, exp));
                         }
                     }
-                    Ordering::Less => new_factors.push(lhs.next().unwrap()),
-                    Ordering::Greater => new_factors.push(rhs.next().unwrap())
+                    Ordering::Less => new_factors2.push(lhs.next().unwrap()),
+                    Ordering::Greater => new_factors2.push(rhs.next().unwrap())
                 }
             }
         }
-        new_factors.extend(lhs);
-        new_factors.extend(rhs);
-        Product(new_factors)
+        if rat_coef != Rational::ONE {
+            match new_factors1.binary_search_by(|x| x.e.denominator().cmp(&1)) {
+                Ok(coef_idx) => new_factors1[coef_idx].b *= Scalar::from(rat_coef),
+                Err(coef_insert) => new_factors1.insert(coef_insert, Exponential {
+                    b: Scalar::from(rat_coef), e: Rational::ONE })
+            }
+        }
+        new_factors1.append(&mut new_factors2);
+        new_factors1.extend(lhs);
+        new_factors1.extend(rhs);
+        Product(new_factors1)
     }
 }
 

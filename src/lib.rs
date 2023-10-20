@@ -18,6 +18,33 @@ mod rational;
  *  Improve on the distribution rule for simplification
  *  Place limits on simplification runtime
  *  Give options to limit simplification rules
+ * 
+ * TOSOLVE:
+ *  [X] Same-exponent RBEs must be combined in products, but normal exponentials in a product 
+ *      are only combined if they have the same base. Also, the RBE partition has to be sorted 
+ *      by exponent instead of base in order for this to work.
+ *      All ways exponent or base can change:
+ *          Like-base exponentials combined: exponent changes
+ *          Like-exponent RBEs combined: base changes
+ *              If RBE simplifies: base & exponent changes
+ *      Options:
+ *          - Have a second vec of RBEs next to the main vec of non-rational-based ones.
+ *          - (Solution) Turn all RBEs into rational-radicand roots. Now RBEs can safely
+ *              be sorted by the exponent's denominator. Raising the product of RBEs to
+ *              a power doesn't change order, because the denominators (being scaled by
+ *              a positive integer) can't be negated to invert order. Also, when like-
+ *              exponent RBEs combine and simplify, either make their product fully rational
+ *              or leave the exponent the same. Then, in Product::mul, just keep a
+ *              variable for the product's rational coefficient, and insert it into the
+ *              final vec of factors before returning it.
+ *  [ ] Sum::add is slow because the rational coefficient is separated from each term, just
+ *      to be factored back in in most cases.
+ *      Options:
+ *          - (Solution) Make an iterator that records and then skips the rational
+ *              coefficient when/if it encounters it. Then use the iterator to compare,
+ *              and if the non-coefficent parts of two terms match, use the recorded
+ *              coefficients to find the new coefficient and collect the rest with
+ *              an equivalent iterator that has ownership of the term.
  */
 
 #[cfg(test)]

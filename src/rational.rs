@@ -156,7 +156,7 @@ impl ops::DivAssign for Rational {
 
 impl ops::BitXor<i32> for Rational {
     type Output = Self;
-    fn bitxor(self, exp: i32) -> Self {
+    fn bitxor(self, exp: i32) -> Self::Output {
         let b = if exp < 0 { Rational::ONE / self } else { self };
         Rational { 
             n: exponentiate(b.n, exp.unsigned_abs()), 
@@ -171,9 +171,9 @@ impl ops::BitXor<Rational> for Rational {
         match exp.d {
             1 => Some(self ^ exp.n),
             exp_d => match (root_i64(self.n as i64, exp_d), root_u64(self.d as u64, exp_d)) {
-                (None, _) | (Some(Err(_)), _) | (_, Err(_)) => None,
                 (Some(Ok(n_root)), Ok(d_root)) =>
-                    Some(Rational { n: n_root as i32, d: d_root as u32, } ^ exp.n)
+                    Some(Rational { n: n_root as i32, d: d_root as u32, } ^ exp.n),
+                _ => None,
             }
         }
     }

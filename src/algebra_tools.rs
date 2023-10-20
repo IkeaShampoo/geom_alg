@@ -78,7 +78,6 @@ pub fn root_u64(radicand: u64, index: u32) -> Result<u64, u64> {
     }
     Err(upper)
 }
-
 pub fn sqrt_u64(radicand: u64) -> Result<u64, u64> {
     let mut lower = 0;
     let mut upper = radicand;
@@ -92,7 +91,6 @@ pub fn sqrt_u64(radicand: u64) -> Result<u64, u64> {
     }
     Err(upper)
 }
-
 pub fn root_i64(radicand: i64, index: u32) -> Option<Result<i64, i64>> {
     if (radicand < 0) && (index & 1 == 0) {
         None
