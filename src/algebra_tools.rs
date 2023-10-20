@@ -1,16 +1,8 @@
 use std::{ops, cmp::Ordering};
 
-/*
-use std::Step;
-pub trait Int = Sized + Copy + Ord + Step +
-    ops::Add + ops::Sub + ops::Mul + ops::Div + ops::Rem +
-    ops::AddAssign + ops::SubAssign + ops::MulAssign + ops::DivAssign + ops::RemAssign +
-    ops::Shl + ops::Shr + ops::ShlAssign + ops::ShrAssign +
-    ops::BitOr + ops::BitAnd + ops::BitXor +
-    ops::BitOrAssign + ops::BitAndAssign + ops::BitXorAssign;
- pub trait Ring = Clone + AddIdentity + ops::Sub<Output = Self> + ops::Neg + MulIdentity + 
-    ops::AddAssign + ops::SubAssign + ops::MulAssign;
- */
+////////////////////////////////////////////////////////////////////////////////////////////////////
+//////////                            Mathematical Operations                             //////////
+////////////////////////////////////////////////////////////////////////////////////////////////////
 
  pub trait AddIdentity: Sized + Clone + ops::Add<Output = Self> {
     const ZERO: Self;
@@ -144,7 +136,9 @@ pub fn simplify_root(mut radicand: u64, mut index: u32) -> (u64, u32) {
     (radicand, index * unsimplifiable_factors)
 }
 
-
+////////////////////////////////////////////////////////////////////////////////////////////////////
+//////////                       Math-Associated Utility Functions                        //////////
+////////////////////////////////////////////////////////////////////////////////////////////////////
 
 // logarithmically-complex implementation of merge
 pub fn merge_all_rec<T: Clone>(size: usize, arguments: &mut dyn Iterator<Item = T>,

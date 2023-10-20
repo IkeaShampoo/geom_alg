@@ -70,6 +70,9 @@ impl Rational {
             (self.n / self.d as i32) + if self.n.is_negative() {-1} else {1}
         }
     }
+    pub fn is_zero(&self) -> bool {
+        self.numerator() == 0
+    }
 }
 
 impl From<i32> for Rational {

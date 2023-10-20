@@ -9,8 +9,8 @@ mod benchmarking;
 mod rational;
 
 /* TODO
- *  In order to ensure Product::mul's correctness, don't simplify rational-based exponentials
- *  In Product::mul: Make sure same-base rational-based exponents are also combined
+ *  Eliminate uses of find_rat_coef; binary search is unnecessary because RBEs will
+ *      always be at the front of a product due to their minimum-exponent-denominator of 1
  *  Test Scalar::{add, mul} and Exponential::new
  *  Give Scalar::is_zero() ability to put exponentiated rationals in a canonical form
  *  Move Scalar::fragment() to another module
@@ -37,7 +37,7 @@ mod rational;
  *              or leave the exponent the same. Then, in Product::mul, just keep a
  *              variable for the product's rational coefficient, and insert it into the
  *              final vec of factors before returning it.
- *  [ ] Sum::add is slow because the rational coefficient is separated from each term, just
+ *  [~] Sum::add is slow because the rational coefficient is separated from each term, just
  *      to be factored back in in most cases.
  *      Options:
  *          - (Solution) Make an iterator that records and then skips the rational

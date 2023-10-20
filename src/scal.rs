@@ -100,46 +100,97 @@ impl Sum {
         else { None }
     }
 }
-
-fn try_sep_coef(prod: &mut Product, i: usize) -> Option<Rational> {
-    if let Some(Exponential { b: Scalar(S::Rational(rat_coef)), e: Rational::ONE }) =
-            prod.ref_factors().get(i) {
-        let rat_coef = *rat_coef;
-        prod.remove_factor(i);
-        Some(rat_coef)
-    }
-    else { None } 
-}
-fn sep_coef(expr: Scalar) -> (Rational, Scalar) {
-    match expr.into() {
-        S::Product(mut prod) => {
-            let i = prod.ref_factors().binary_search(&Exponential::ONE).map_or_else(|i| i, |i| i);
-            if let Some(rat_coef) = try_sep_coef(&mut prod, i) {
-                return (rat_coef, Scalar::from(prod));
-            } 
-            if let Some(rat_coef) = try_sep_coef(&mut prod, i + 1) {
-                return (rat_coef, Scalar::from(prod));
-            }
-            if i > 0 {
-                if let Some(rat_coef) = try_sep_coef(&mut prod, i - 1) {
-                    return (rat_coef, Scalar::from(prod));
-                }
-            }
-            (Rational::ONE, Scalar(S::Product(prod)))
+impl From<Scalar> for Sum {
+    fn from(x: Scalar) -> Self {
+        match x {
+            Scalar::ZERO => Sum(Vec::new()),
+            Scalar(S::Sum(sum)) => sum,
+            x => Sum(vec![x])
         }
-        S::Rational(coeff) => (coeff, Scalar::ONE),
-        x => (Rational::ONE, Scalar(x))
     }
 }
 
-// TODO: fix this. it's for sure slow as shit
+/// Returns Ok(Coefs) if the sequences are equal, or Err(bool) otherwise to indicate
+/// whether lhs is less than rhs
+fn cmp_non_coef_iter<'a, 'b>(lhs: impl Iterator<Item = &'a Exponential>,
+        rhs: impl Iterator<Item = &'b Exponential>,
+        lhs_coef_idx: usize, rhs_coef_idx: usize) -> Result<Coefs, bool> {
+    let lhs = lhs.peekable();
+    let rhs = rhs.peekable();
+    
+    todo!()
+}
+
+fn to_non_coef_iter<'a>(x: &'a Scalar) -> Box<dyn Iterator<Item = &'a Exponential>> {
+    match x.as_ref() {
+        S::Rational
+        S::Product(prod) => Box::new(prod.ref_factors().iter()),
+        _ => todo!()
+    }
+}
+
+fn cmp_or_combine(lhs: &Scalar, rhs: &Scalar) -> Result<Scalar, bool> {
+    match (lhs.as_ref(), rhs.as_ref()) {
+        ()
+    }
+}
+
+struct CoefSepProd {
+    coef: Rational,
+    coef_idx: Option<usize>
+}
+
+struct Coefs {
+    lhs_coef: Rational,
+    rhs_coef: Rational,
+}
+fn cmp_non_coefx(lhs: &Vec<Exponential>, rhs: &Vec<Exponential>, 
+        lhs_coef_idx: usize, rhs_coef_idx: usize) -> Ordering {
+    let mut lhs = lhs.iter().peekable();
+    let mut rhs = rhs.iter().peekable();
+    let mut lhs_idx: usize = 0;
+    let mut rhs_idx: usize = 0;
+    loop {
+        if lhs_idx == lhs_coef_idx { lhs.next(); }
+        if rhs_idx == rhs_coef_idx { rhs.next(); }
+        match (lhs.next(), rhs.next()) {
+            (Some(lhs_factor), Some(rhs_factor)) => match lhs_factor.cmp(rhs_factor) {
+                Ordering::Equal => {},
+                not_equal => return not_equal
+            }
+            (Some(_), None) => return Ordering::Greater,
+            (None, Some(_)) => return Ordering::Less,
+            (None, None) => return Ordering::Equal
+        }
+        lhs_idx += 1;
+        rhs_idx += 1;
+    }
+}
+
 impl Sum {
     fn add(self, rhs: Self) -> Self {
-        let mut lhs = self.into_terms().into_iter().map(|t| sep_coef(t)).peekable();
-        let mut rhs = rhs.into_terms().into_iter().map(|t| sep_coef(t)).peekable();
+        let mut lhs = self.into_terms().into_iter().peekable();
+        let mut rhs = rhs.into_terms().into_iter().peekable();
         let mut new_terms: Vec<Scalar> = Vec::with_capacity(lhs.len() + rhs.len());
-        while let (Some((lhs_coef, lhs_next)), Some((rhs_coef, rhs_next))) =
-                (lhs.peek(), rhs.peek()) {
+        while let (Some(lhs_next), Some(rhs_next)) = (lhs.peek(), rhs.peek()) {
+            match (lhs_next.as_ref(), rhs_next.as_ref()) {
+                (&S::Rational(lr), &S::Rational(rr)) => { // combine
+                    lhs.next(); rhs.next();
+                    let sum = lr + rr;
+                    if !sum.is_zero() { new_terms.push(Scalar::from(sum)); } }
+                (&S::Rational(lr), _) => { lhs.next(); new_terms.push(Scalar::from(lr)); }
+                (_, &S::Rational(rr)) => { rhs.next(); new_terms.push(Scalar::from(rr)); }
+                (S::Variable(lv), S::Variable(rv)) => match lv.cmp(rv) {
+                    Ordering::Equal => {
+                        rhs.next();
+                        new_terms.push(Scalar::from(2) * lhs.next().unwrap()); }
+                    Ordering::Less => new_terms.push(lhs.next().unwrap()),
+                    Ordering::Greater => new_terms.push(rhs.next().unwrap()) }
+                (S::Variable(lv), S::Product(rp)) => todo!(), // take lv if rp != rational * lv or combine
+                (S::Product(lp), S::Variable(rv)) => todo!(), // take rv if lp != rational * rv or combine
+                (S::Product(lp), S::Product(rp)) => todo!(), // take least or combine
+                _ => {} // a sum cannot exist as a term of another sum
+            }
             if lhs_next == lhs_next {
                 let new_coef = *lhs_coef + *rhs_coef;
                 if new_coef != Rational::ZERO {
@@ -162,16 +213,6 @@ impl Sum {
     }
 }
 
-impl From<Scalar> for Sum {
-    fn from(x: Scalar) -> Self {
-        match x {
-            Scalar::ZERO => Sum(Vec::new()),
-            Scalar(S::Sum(sum)) => sum,
-            x => Sum(vec![x])
-        }
-    }
-}
-
 
 
 #[derive(Clone, PartialEq, PartialOrd, Eq, Ord)]
@@ -188,14 +229,38 @@ impl Product {
         else { None }
     }
 }
+impl From<Scalar> for Product {
+    fn from(x: Scalar) -> Self {
+        match x {
+            Scalar::ONE => Product(Vec::new()),
+            Scalar(S::Product(product)) => product,
+            x => Product(vec![Exponential { b: x, e: Rational::ONE }])
+        }
+    }
+}
+
+fn find_rat_coef(factors: &Vec<Exponential>) -> Result<usize, usize> {
+    factors.binary_search_by(|x| match x.b.as_ref() {
+        S::Rational(_) => x.e.denominator().cmp(&1),
+        _ => Ordering::Greater
+    })
+}
+fn get_rat_coef(factors: &Vec<Exponential>) -> (usize, Rational) {
+    match find_rat_coef(factors) {
+        Ok(i) => match factors[i].b.as_ref() {
+            &S::Rational(rat_coef) => (i, rat_coef),
+            _ => panic!("expected base {} to be rational", factors[i].b)
+        }
+        Err(_) => (factors.len(), Rational::ONE)
+    }
+}
 
 impl Product {
     fn mul(self, rhs: Self) -> Self {
         let mut lhs = self.into_factors().into_iter().peekable();
         let mut rhs = rhs.into_factors().into_iter().peekable();
         let mut rat_coef = Rational::ONE;
-        let mut new_factors1: Vec<Exponential> = Vec::with_capacity(lhs.len() + rhs.len());
-        let mut new_factors2: Vec<Exponential> = Vec::new();
+        let mut new_factors: Vec<Exponential> = Vec::with_capacity(lhs.len() + rhs.len());
         while let (Some(lhs_next), Some(rhs_next)) = (lhs.peek(), rhs.peek()) {
             if let (&S::Rational(lhs_rat), &S::Rational(rhs_rat)) = 
                     (lhs_next.ref_base().as_ref(), rhs_next.ref_base().as_ref()) {
@@ -210,12 +275,12 @@ impl Product {
                             };
                         }
                         else {
-                            new_factors1.push(combined);
+                            new_factors.push(combined);
                         }
                         lhs.next(); rhs.next();
                     }
-                    Ordering::Less => new_factors1.push(lhs.next().unwrap()),
-                    Ordering::Greater => new_factors1.push(rhs.next().unwrap())
+                    Ordering::Less => new_factors.push(lhs.next().unwrap()),
+                    Ordering::Greater => new_factors.push(rhs.next().unwrap())
                 }
             }
             else {
@@ -225,35 +290,24 @@ impl Product {
                         let base = rhs.next().unwrap().b;
                         lhs.next();
                         if exp != Rational::ZERO {
-                            new_factors2.push(Exponential::new(base, exp));
+                            new_factors.push(Exponential::new(base, exp));
                         }
                     }
-                    Ordering::Less => new_factors2.push(lhs.next().unwrap()),
-                    Ordering::Greater => new_factors2.push(rhs.next().unwrap())
+                    Ordering::Less => new_factors.push(lhs.next().unwrap()),
+                    Ordering::Greater => new_factors.push(rhs.next().unwrap())
                 }
             }
         }
         if rat_coef != Rational::ONE {
-            match new_factors1.binary_search_by(|x| x.e.denominator().cmp(&1)) {
-                Ok(coef_idx) => new_factors1[coef_idx].b *= Scalar::from(rat_coef),
-                Err(coef_insert) => new_factors1.insert(coef_insert, Exponential {
+            match find_rat_coef(&new_factors) {
+                Ok(i) => new_factors[i].b *= Scalar::from(rat_coef),
+                Err(i) => new_factors.insert(i, Exponential {
                     b: Scalar::from(rat_coef), e: Rational::ONE })
             }
         }
-        new_factors1.append(&mut new_factors2);
-        new_factors1.extend(lhs);
-        new_factors1.extend(rhs);
-        Product(new_factors1)
-    }
-}
-
-impl From<Scalar> for Product {
-    fn from(x: Scalar) -> Self {
-        match x {
-            Scalar::ONE => Product(Vec::new()),
-            Scalar(S::Product(product)) => product,
-            x => Product(vec![Exponential { b: x, e: Rational::ONE }])
-        }
+        new_factors.extend(lhs);
+        new_factors.extend(rhs);
+        Product(new_factors)
     }
 }
 
@@ -284,6 +338,11 @@ impl From<&str> for Scalar {
 impl From<Rational> for Scalar {
     fn from(fraction: Rational) -> Self {
         Scalar(S::Rational(fraction))
+    }
+}
+impl From<i32> for Scalar {
+    fn from(integer: i32) -> Self {
+        Scalar(S::Rational::from(integer))
     }
 }
 impl From<Exponential> for Scalar {
@@ -331,11 +390,13 @@ impl From<ScalarInner> for Scalar {
 }
 
 impl Into<ScalarInner> for Scalar {
+    #[inline(always)]
     fn into(self) -> S {
         match self { Scalar(x) => x }
     }
 }
 impl AsRef<ScalarInner> for Scalar {
+    #[inline(always)]
     fn as_ref(&self) -> &ScalarInner {
         match self { Scalar(x) => x }
     }
@@ -365,8 +426,7 @@ impl ops::Add for Scalar {
     fn add(self, rhs: Self) -> Self::Output {
         match (self, rhs) {
             (Scalar(S::Rational(lhs)), Scalar(S::Rational(rhs))) => Scalar(S::Rational(lhs + rhs)),
-            (Scalar::ZERO, rhs) => rhs,
-            (lhs, Scalar::ZERO) => lhs,
+            (Scalar::ZERO, x) | (x, Scalar::ZERO) => x,
             (lhs, rhs) => Scalar::from(Sum::add(Sum::from(lhs), Sum::from(rhs)))
         }
     }
@@ -383,8 +443,7 @@ impl ops::Mul for Scalar {
         match (self, rhs) {
             (Scalar(S::Rational(lhs)), Scalar(S::Rational(rhs))) => Scalar(S::Rational(lhs * rhs)),
             (Scalar::ZERO, _) | (_, Scalar::ZERO) => return Scalar::ZERO,
-            (Scalar::ONE, rhs) => rhs,
-            (lhs, Scalar::ONE) => lhs,
+            (Scalar::ONE, x) | (x, Scalar::ONE) => x,
             (lhs, rhs) => Scalar::from(Product::mul(Product::from(lhs), Product::from(rhs)))
         }
     }
