@@ -110,60 +110,28 @@ impl From<Scalar> for Sum {
     }
 }
 
-/// Returns Ok(Coefs) if the sequences are equal, or Err(bool) otherwise to indicate
-/// whether lhs is less than rhs
-fn cmp_non_coef_iter<'a, 'b>(lhs: impl Iterator<Item = &'a Exponential>,
-        rhs: impl Iterator<Item = &'b Exponential>,
-        lhs_coef_idx: usize, rhs_coef_idx: usize) -> Result<Coefs, bool> {
-    let lhs = lhs.peekable();
-    let rhs = rhs.peekable();
-    
-    todo!()
-}
-
-fn to_non_coef_iter<'a>(x: &'a Scalar) -> Box<dyn Iterator<Item = &'a Exponential>> {
-    match x.as_ref() {
-        S::Rational
-        S::Product(prod) => Box::new(prod.ref_factors().iter()),
-        _ => todo!()
-    }
-}
-
-fn cmp_or_combine(lhs: &Scalar, rhs: &Scalar) -> Result<Scalar, bool> {
-    match (lhs.as_ref(), rhs.as_ref()) {
-        ()
-    }
-}
-
-struct CoefSepProd {
-    coef: Rational,
-    coef_idx: Option<usize>
-}
-
-struct Coefs {
-    lhs_coef: Rational,
-    rhs_coef: Rational,
-}
-fn cmp_non_coefx(lhs: &Vec<Exponential>, rhs: &Vec<Exponential>, 
-        lhs_coef_idx: usize, rhs_coef_idx: usize) -> Ordering {
+fn cmp_non_coef(lhs: &Vec<Exponential>, rhs: &Vec<Exponential>) -> Result<bool, (bool, Rational)> {
     let mut lhs = lhs.iter().peekable();
     let mut rhs = rhs.iter().peekable();
-    let mut lhs_idx: usize = 0;
-    let mut rhs_idx: usize = 0;
+    let lc = if let Some(&&Exponential { 
+        b: Scalar(S::Rational(c)), e: Rational::ONE }) = lhs.peek() {
+            lhs.next(); c
+    } else { Rational::ONE };
+    let rc = if let Some(&&Exponential { 
+        b: Scalar(S::Rational(c)), e: Rational::ONE }) = rhs.peek() {
+            rhs.next(); c
+    } else { Rational::ONE };
     loop {
-        if lhs_idx == lhs_coef_idx { lhs.next(); }
-        if rhs_idx == rhs_coef_idx { rhs.next(); }
         match (lhs.next(), rhs.next()) {
             (Some(lhs_factor), Some(rhs_factor)) => match lhs_factor.cmp(rhs_factor) {
                 Ordering::Equal => {},
-                not_equal => return not_equal
+                Ordering::Greater => return Ok(true),
+                Ordering::Less => return Ok(false)
             }
-            (Some(_), None) => return Ordering::Greater,
-            (None, Some(_)) => return Ordering::Less,
-            (None, None) => return Ordering::Equal
+            (Some(_), None) => return Ok(true),
+            (None, Some(_)) => return Ok(false),
+            (None, None) => return Err((lc != Rational::ONE, lc + rc))
         }
-        lhs_idx += 1;
-        rhs_idx += 1;
     }
 }
 
@@ -186,29 +154,60 @@ impl Sum {
                         new_terms.push(Scalar::from(2) * lhs.next().unwrap()); }
                     Ordering::Less => new_terms.push(lhs.next().unwrap()),
                     Ordering::Greater => new_terms.push(rhs.next().unwrap()) }
-                (S::Variable(lv), S::Product(rp)) => todo!(), // take lv if rp != rational * lv or combine
-                (S::Product(lp), S::Variable(rv)) => todo!(), // take rv if lp != rational * rv or combine
-                (S::Product(lp), S::Product(rp)) => todo!(), // take least or combine
+                (S::Variable(lv), S::Product(Product(rp))) => match 
+                        (rp.get(0), rp.get(1), rp.get(3)) {
+                    (Some(&Exponential { b: Scalar(S::Rational(rc)), e: Rational::ONE }),
+                    Some(Exponential { b: Scalar(S::Variable(rv)), e: Rational::ONE }), None) =>
+                        if lv == rv {
+                            let lv = lhs.next().unwrap();
+                            rhs.next();
+                            if rc != Rational::from(-1) {
+                                new_terms.push(Scalar::from(rc + Rational::ONE) * lv);
+                            }
+                        }
+                        else { new_terms.push(lhs.next().unwrap()); }
+                    _ => new_terms.push(lhs.next().unwrap()) 
+                }
+                (S::Product(Product(lp)), S::Variable(rv)) => match 
+                        (lp.get(0), lp.get(1), lp.get(3)) {
+                    (Some(&Exponential { b: Scalar(S::Rational(lc)), e: Rational::ONE }),
+                    Some(Exponential { b: Scalar(S::Variable(lv)), e: Rational::ONE }), None) =>
+                        if rv == lv {
+                            let rv = rhs.next().unwrap();
+                            lhs.next();
+                            if lc != Rational::from(-1) {
+                                new_terms.push(Scalar::from(lc + Rational::ONE) * rv);
+                            }
+                        }
+                        else { new_terms.push(lhs.next().unwrap()); }
+                    _ => new_terms.push(lhs.next().unwrap())
+                }
+                (S::Product(Product(lp)), S::Product(Product(rp))) => match cmp_non_coef(lp, rp) {
+                    Ok(false) => new_terms.push(lhs.next().unwrap()),
+                    Ok(true) => new_terms.push(rhs.next().unwrap()),
+                    Err((lp_has_rat_coef, new_coef)) => {
+                        rhs.next();
+                        match lhs.next().unwrap().into() {
+                            S::Product(Product(mut lp)) => if !new_coef.is_zero() {
+                                if lp_has_rat_coef {
+                                    lp.remove(0);
+                                }
+                                if new_coef != Rational::ONE {
+                                    lp.insert(0, Exponential {
+                                        b: Scalar::from(new_coef),
+                                        e: Rational::ONE });
+                                }
+                                new_terms.push(Scalar::from(Product(lp)));
+                            }
+                            _ => panic!()
+                        }
+                    }
+                }
                 _ => {} // a sum cannot exist as a term of another sum
             }
-            if lhs_next == lhs_next {
-                let new_coef = *lhs_coef + *rhs_coef;
-                if new_coef != Rational::ZERO {
-                    let (_, lhs_next) = lhs.next().unwrap();
-                    rhs.next();
-                    new_terms.push(Scalar::from(new_coef) * lhs_next);
-                }
-            }
-            else {
-                new_terms.push(match
-                    if *lhs_next < *rhs_next { lhs.next() }
-                    else { rhs.next() } .unwrap() {
-                        (coef, next) => Scalar(S::Rational(coef)) * next
-                    });
-            }
         }
-        new_terms.extend(lhs.map(|(coef, next)| Scalar(S::Rational(coef)) * next));
-        new_terms.extend(rhs.map(|(coef, next)| Scalar(S::Rational(coef)) * next));
+        new_terms.extend(lhs);
+        new_terms.extend(rhs);
         Sum(new_terms)
     }
 }
@@ -236,22 +235,6 @@ impl From<Scalar> for Product {
             Scalar(S::Product(product)) => product,
             x => Product(vec![Exponential { b: x, e: Rational::ONE }])
         }
-    }
-}
-
-fn find_rat_coef(factors: &Vec<Exponential>) -> Result<usize, usize> {
-    factors.binary_search_by(|x| match x.b.as_ref() {
-        S::Rational(_) => x.e.denominator().cmp(&1),
-        _ => Ordering::Greater
-    })
-}
-fn get_rat_coef(factors: &Vec<Exponential>) -> (usize, Rational) {
-    match find_rat_coef(factors) {
-        Ok(i) => match factors[i].b.as_ref() {
-            &S::Rational(rat_coef) => (i, rat_coef),
-            _ => panic!("expected base {} to be rational", factors[i].b)
-        }
-        Err(_) => (factors.len(), Rational::ONE)
     }
 }
 
@@ -299,10 +282,14 @@ impl Product {
             }
         }
         if rat_coef != Rational::ONE {
-            match find_rat_coef(&new_factors) {
-                Ok(i) => new_factors[i].b *= Scalar::from(rat_coef),
-                Err(i) => new_factors.insert(i, Exponential {
-                    b: Scalar::from(rat_coef), e: Rational::ONE })
+            match new_factors.get(0) {
+                Some(Exponential {
+                    b: Scalar(S::Rational(_)), 
+                    e: Rational::ONE }) =>
+                    new_factors[0].b *= Scalar::from(rat_coef),
+                _ => new_factors.insert(0, Exponential {
+                    b: Scalar::from(rat_coef),
+                    e: Rational::ONE })
             }
         }
         new_factors.extend(lhs);
@@ -342,7 +329,7 @@ impl From<Rational> for Scalar {
 }
 impl From<i32> for Scalar {
     fn from(integer: i32) -> Self {
-        Scalar(S::Rational::from(integer))
+        Scalar(S::Rational(Rational::from(integer)))
     }
 }
 impl From<Exponential> for Scalar {
@@ -596,9 +583,12 @@ impl Scalar {
     // doesn't work with non-polynomial-like expressions
     pub fn is_zero(&self) -> bool {
         fn distribute(a: Scalar, b: Scalar) -> Scalar {
-            let (a, b): (Sum, Sum) = (a.into(), b.into());
-            add_all(a.ref_terms().iter().map(|t1| 
-                add_all(b.ref_terms().iter().map(|t2| t1.clone() * t2.clone()))))
+            let (a, b) = (Sum::from(a), Sum::from(b));
+            merge_all_rec(a.ref_terms().len() * b.ref_terms().len(), 
+                &mut a.ref_terms().iter()
+                    .map(|t1| b.ref_terms().iter().map(|t2| t1.clone() * t2.clone()))
+                    .flatten(),
+                |x, y| x + y, &Scalar::ZERO)
         }
         fn expand(b: Scalar, e: u32) -> Scalar {
             merge_self(b.clone(), e, distribute, &b)
@@ -608,10 +598,11 @@ impl Scalar {
                 S::Sum(s) => add_all(s.ref_terms().iter().map(|term| distribute_all(term))),
                 S::Product(p) => merge_all(p.ref_factors().iter().map(
                     |Exponential { b: terms, e: exp }|
-                    if exp.numerator() > 0 && exp.denominator() == 1 {
-                        expand(distribute_all(&terms), exp.numerator().unsigned_abs())
-                    } 
-                    else { terms.clone() ^ *exp }), distribute, &Scalar::ONE),
+                        if exp.numerator() > 0 && exp.denominator() == 1 {
+                            expand(distribute_all(&terms), exp.numerator().unsigned_abs())
+                        }
+                        else { Scalar::from(Exponential { b: terms.clone(), e: *exp }) }),
+                    distribute, &Scalar::ONE),
                 x => expr.clone()
             }
         }

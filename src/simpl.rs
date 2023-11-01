@@ -331,10 +331,9 @@ impl Simplifier {
 
     fn derive(expr: &Scalar) -> Vec<Scalar> {
         //println!("{expr}");
-        let mut transformed: Vec<Scalar> = Vec::new();
-        for rule in &RULES {
-            transformed.append(&mut (*rule)(expr));
-        }
+        let mut transformed: Vec<Scalar> = RULES.iter()
+            .map(|rule| rule(expr).into_iter())
+            .flatten().collect();
         match expr.as_ref() {
             ScalarInner::Sum(terms) => {
                 for (i, term) in terms.ref_terms().iter().enumerate() {

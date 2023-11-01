@@ -9,8 +9,6 @@ mod benchmarking;
 mod rational;
 
 /* TODO
- *  Eliminate uses of find_rat_coef; binary search is unnecessary because RBEs will
- *      always be at the front of a product due to their minimum-exponent-denominator of 1
  *  Test Scalar::{add, mul} and Exponential::new
  *  Give Scalar::is_zero() ability to put exponentiated rationals in a canonical form
  *  Move Scalar::fragment() to another module
@@ -37,7 +35,7 @@ mod rational;
  *              or leave the exponent the same. Then, in Product::mul, just keep a
  *              variable for the product's rational coefficient, and insert it into the
  *              final vec of factors before returning it.
- *  [~] Sum::add is slow because the rational coefficient is separated from each term, just
+ *  [X] Sum::add is slow because the rational coefficient is separated from each term, just
  *      to be factored back in in most cases.
  *      Options:
  *          - (Solution) Make an iterator that records and then skips the rational
@@ -57,33 +55,46 @@ mod tests {
     use benchmarking::Stopwatch;
 
     #[test]
-    fn basic_addition_test() {
+    fn addition_test() {
         let watch = Stopwatch::new_running();
-        let x = Scalar::from(Rational::from(5));
+        let x = Scalar::from(5);
+        let y = Scalar::from(7);
+        let z = Scalar::from(-5);
         let a = Scalar::from("a");
+        let b = Scalar::from("b");
+        let c = Scalar::from("c");
         let xa = x.clone() + a.clone();
         let ax = a.clone() + x.clone();
-        let xabc = xa.clone() + (Scalar::from("b") * Scalar::from("c"));
+        let xabc =
+            (x.clone() * a.clone() * c.clone()) + (z.clone() * b.clone()) +
+            (c.clone() * y.clone() * a.clone()) + (x.clone() * b.clone()) +
+            (b.clone() * c.clone());
 
-        println!("{} is ordered {:?} than {}", x, x.cmp(&a), a);
         println!("{xabc}");
         assert_eq!(ax, xa);
         assert_eq!(ax.to_string(), xa.to_string());
-        assert_eq!(ax.to_string(), String::from("(5 + a)"));
+        assert_eq!(ax.to_string().as_str(), "(5 + a)");
+        assert_eq!(xabc.to_string().as_str(), "((12 * a * c) + (b * c))");
         println!("basic_addition_test runtime: {watch} nanoseconds");
     }
 
     #[test]
     fn basic_multiplication_test() {
         let watch = Stopwatch::new_running();
-        let x = Scalar::from(Rational::from(5));
+        let x_rat = Rational::from(5);
+        let x = Scalar::from(x_rat);
+        let x_sqrt = x.clone() ^ Rational::new(1, 2);
         let a = Scalar::from("a");
         let xa = x.clone() * a.clone();
         let ax = a.clone() * x.clone();
+        let prod1 = x_sqrt.clone() * (a.clone() ^ x_rat) * x.clone();
+        let prod2 = x.clone() * x_sqrt.clone() * (a.clone() ^ x_rat) * x_sqrt.clone() * a.clone();
 
         assert_eq!(ax, xa);
         assert_eq!(ax.to_string(), xa.to_string());
-        assert_eq!(ax.to_string(), String::from("(5 * a)"));
+        assert_eq!(ax.to_string().as_str(), "(5 * a)");
+        assert_eq!(prod1.to_string().as_str(), "(5 * (5^(1/2)) * (a^5))");
+        assert_eq!(prod2.to_string().as_str(), "(25 * (a^6))");
         println!("basic_multiplication_test runtime: {watch} nanoseconds");
     }
 
