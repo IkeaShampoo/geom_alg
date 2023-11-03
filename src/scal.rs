@@ -178,22 +178,19 @@ impl Sum {
                 Ok(true) => new_terms.push(rhs.next().unwrap().b),
                 Err((lp_has_rat_coef, new_coef)) => {
                     rhs.next();
-                    match lhs.next().unwrap().b.into() {
-                        S::Product(Product(mut lp)) => {
-                            if !new_coef.is_zero() {
-                                if lp_has_rat_coef {
-                                    lp.remove(0);
-                                }
-                                if new_coef != Rational::ONE {
-                                    lp.insert(
-                                        0,
-                                        Exponential { b: Scalar::from(new_coef), e: Rational::ONE },
-                                    );
-                                }
-                                new_terms.push(Scalar::from(Product(lp)));
-                            }
+                    let lp = lhs.next();
+                    if !new_coef.is_zero() {
+                        let mut lp = Product::from(lp.unwrap().b).into_factors();
+                        if lp_has_rat_coef {
+                            lp.remove(0);
                         }
-                        _ => panic!(),
+                        if new_coef != Rational::ONE {
+                            lp.insert(
+                                0,
+                                Exponential { b: Scalar::from(new_coef), e: Rational::ONE },
+                            );
+                        }
+                        new_terms.push(Scalar::from(Product(lp)));
                     }
                 }
             }
