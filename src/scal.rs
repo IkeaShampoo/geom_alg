@@ -2,6 +2,8 @@ use super::{algebra_tools::*, rational::*};
 
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
+use std::iter::Peekable;
+use std::slice::Iter;
 use std::{fmt, mem, ops};
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -120,23 +122,21 @@ impl From<Scalar> for Sum {
     }
 }
 
+fn get_rat_coef(prod: &mut Peekable<Iter<'_, Exponential>>) -> Rational {
+    match prod.peek() {
+        Some(&&Exponential { b: Scalar(S::Rational(c)), e: Rational::ONE }) => {
+            prod.next();
+            c
+        }
+        _ => Rational::ONE,
+    }
+}
+
 fn cmp_non_coef(lhs: &[Exponential], rhs: &[Exponential]) -> Result<bool, (bool, Rational)> {
     let mut lhs = lhs.iter().peekable();
     let mut rhs = rhs.iter().peekable();
-    let lc = if let Some(&&Exponential { b: Scalar(S::Rational(c)), e: Rational::ONE }) = lhs.peek()
-    {
-        lhs.next();
-        c
-    } else {
-        Rational::ONE
-    };
-    let rc = if let Some(&&Exponential { b: Scalar(S::Rational(c)), e: Rational::ONE }) = rhs.peek()
-    {
-        rhs.next();
-        c
-    } else {
-        Rational::ONE
-    };
+    let lc = get_rat_coef(&mut lhs);
+    let rc = get_rat_coef(&mut rhs);
     loop {
         match (lhs.next(), rhs.next()) {
             (Some(lhs_factor), Some(rhs_factor)) => match lhs_factor.cmp(rhs_factor) {
