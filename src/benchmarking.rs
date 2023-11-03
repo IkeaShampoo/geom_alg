@@ -1,9 +1,12 @@
-use std::{fmt, time::{Instant, Duration}};
+use std::{
+    fmt,
+    time::{Duration, Instant},
+};
 
 pub struct Stopwatch {
     accumulated_time: Duration,
     last_time: Instant,
-    is_running: bool
+    is_running: bool,
 }
 
 impl Stopwatch {
@@ -11,14 +14,14 @@ impl Stopwatch {
         Stopwatch {
             accumulated_time: Duration::from_secs(0),
             last_time: Instant::now(),
-            is_running: false
+            is_running: false,
         }
     }
     pub fn new_running() -> Stopwatch {
         Stopwatch {
             accumulated_time: Duration::from_secs(0),
             last_time: Instant::now(),
-            is_running: true
+            is_running: true,
         }
     }
     pub fn start(&mut self) {
@@ -40,8 +43,9 @@ impl Stopwatch {
     pub fn read_nanos(&self) -> u128 {
         match self.is_running {
             true => self.accumulated_time + (Instant::now() - self.last_time),
-            false => self.accumulated_time
-        }.as_nanos()
+            false => self.accumulated_time,
+        }
+        .as_nanos()
     }
 }
 

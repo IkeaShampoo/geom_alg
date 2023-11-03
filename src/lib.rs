@@ -1,25 +1,24 @@
 //#![feature(trait_alias)]
 //#![feature(step_trait)]
 
-pub mod scal;
-pub mod ga;
-pub mod simpl;
 mod algebra_tools;
 mod benchmarking;
+pub mod ga;
 mod rational;
+pub mod scal;
+pub mod simpl;
 
 /* TODO
- *  Test Scalar::{add, mul} and Exponential::new
  *  Give Scalar::is_zero() ability to put exponentiated rationals in a canonical form
  *  Move Scalar::fragment() to another module
  *  Make a second version of Simplifier that doesn't cap complexity
  *  Improve on the distribution rule for simplification
  *  Place limits on simplification runtime
  *  Give options to limit simplification rules
- * 
+ *
  * TOSOLVE:
- *  [X] Same-exponent RBEs must be combined in products, but normal exponentials in a product 
- *      are only combined if they have the same base. Also, the RBE partition has to be sorted 
+ *  [X] Same-exponent RBEs must be combined in products, but normal exponentials in a product
+ *      are only combined if they have the same base. Also, the RBE partition has to be sorted
  *      by exponent instead of base in order for this to work.
  *      All ways exponent or base can change:
  *          Like-base exponentials combined: exponent changes
@@ -48,11 +47,11 @@ mod rational;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use scal::*;
-    use rational::*;
-    use ga::*;
     use algebra_tools::*;
     use benchmarking::Stopwatch;
+    use ga::*;
+    use rational::*;
+    use scal::*;
 
     #[test]
     fn addition_test() {
@@ -65,10 +64,11 @@ mod tests {
         let c = Scalar::from("c");
         let xa = x.clone() + a.clone();
         let ax = a.clone() + x.clone();
-        let xabc =
-            (x.clone() * a.clone() * c.clone()) + (z.clone() * b.clone()) +
-            (c.clone() * y.clone() * a.clone()) + (x.clone() * b.clone()) +
-            (b.clone() * c.clone());
+        let xabc = (x.clone() * a.clone() * c.clone())
+            + (z.clone() * b.clone())
+            + (c.clone() * y.clone() * a.clone())
+            + (x.clone() * b.clone())
+            + (b.clone() * c.clone());
 
         println!("{xabc}");
         assert_eq!(ax, xa);
@@ -119,20 +119,28 @@ mod tests {
         //+ (r3 * (-1^2) * ((r1 * x2) + (r2 * x1 * -1) + (r4 * x3)))
         //+ (r4 * -1 * ((r1 * x1) + (r2 * x2) + (r3 * x3)))
         let watch = Stopwatch::new_running();
-        let (a, b, c, d) = (Scalar::from("a"), Scalar::from("b"), 
-                            Scalar::from("c"), Scalar::from("d"));
+        let (a, b, c, d) = (
+            Scalar::from("a"),
+            Scalar::from("b"),
+            Scalar::from("c"),
+            Scalar::from("d"),
+        );
         let (x, y, z) = (Scalar::from("e"), Scalar::from("f"), Scalar::from("g"));
-        let prod1 = a.clone() * ((b.clone() * z.clone()) + 
-                                 (c.clone() * y.clone() * -Scalar::ONE) + 
-                                 (d.clone() * x.clone()));
+        let prod1 = a.clone()
+            * ((b.clone() * z.clone())
+                + (c.clone() * y.clone() * -Scalar::ONE)
+                + (d.clone() * x.clone()));
         //println!("\nPROD1: {}", prod1.simplified());
-        let prod2 = b.clone() * ((a.clone() * z.clone()) + 
-                                 (c.clone() * x.clone() * -Scalar::ONE) + 
-                                 (d.clone() * y.clone() * -Scalar::ONE)) * -Scalar::ONE;
+        let prod2 = b.clone()
+            * ((a.clone() * z.clone())
+                + (c.clone() * x.clone() * -Scalar::ONE)
+                + (d.clone() * y.clone() * -Scalar::ONE))
+            * -Scalar::ONE;
         //println!("\nPROD2: {}", prod2.simplified());
-        let prod3 = c.clone() * ((a.clone() * y.clone() * ((-Scalar::ONE) ^ Rational::from(2))) + 
-                                 (b.clone() * x.clone() * -Scalar::ONE) + 
-                                 (d.clone() * z.clone()));
+        let prod3 = c.clone()
+            * ((a.clone() * y.clone() * ((-Scalar::ONE) ^ Rational::from(2)))
+                + (b.clone() * x.clone() * -Scalar::ONE)
+                + (d.clone() * z.clone()));
         //println!("\nPROD3: {}", prod3.simplified());
         let prod4 = d.clone() * ((a * x) + (b * y) + (c * z)) * -Scalar::ONE;
         //println!("\nPROD4: {}", prod4.simplified());
@@ -149,9 +157,13 @@ mod tests {
     fn rotor_test() {
         let watch = Stopwatch::new_running();
         let dimensions: usize = 3;
-        let basis = merge_all_rec(dimensions, &mut (1..=dimensions)
+        let basis = merge_all_rec(
+            dimensions,
+            &mut (1..=dimensions)
                 .map(|i| KBlade::from(CBVec { id: i as i32, square: Scalar::ONE })),
-            |a, b| a * b, &KBlade::ONE);
+            |a, b| a * b,
+            &KBlade::ONE,
+        );
         println!("{basis}");
         let r = MVec::with_name(&String::from("r"), &basis, 2);
         let r_inv = r.clone().reverse_mul_order();

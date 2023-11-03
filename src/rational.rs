@@ -16,7 +16,10 @@ fn gcd(a: u32, b: u32) -> u32 {
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
-pub struct Rational { n: i32, d: u32 }
+pub struct Rational {
+    n: i32,
+    d: u32,
+}
 
 impl AddIdentity for Rational {
     const ZERO: Rational = Rational { n: 0, d: 1 };
@@ -34,9 +37,11 @@ impl Rational {
     }
 
     pub fn new(num: i32, den: i32) -> Rational {
-        let (n, d): (i32, u32) =
-            if den < 0 {(num * -1, (den * -1) as u32)}
-            else { (num, den as u32) };
+        let (n, d): (i32, u32) = if den < 0 {
+            (num * -1, (den * -1) as u32)
+        } else {
+            (num, den as u32)
+        };
         let gcd_nd: u32 = gcd(n.unsigned_abs(), d);
         return Rational { n: n / (gcd_nd as i32), d: d / gcd_nd };
     }
@@ -46,16 +51,14 @@ impl Rational {
     pub fn floor(self) -> i32 {
         if self.n.is_positive() || self.n % self.d as i32 == 0 {
             self.n / self.d as i32
-        }
-        else {
+        } else {
             (self.n / self.d as i32) - 1
         }
     }
     pub fn ceil(self) -> i32 {
         if self.n.is_negative() || self.n % self.d as i32 == 0 {
             self.n / self.d as i32
-        }
-        else {
+        } else {
             (self.n / self.d as i32) + 1
         }
     }
@@ -65,9 +68,8 @@ impl Rational {
     pub fn round_from_zero(self) -> i32 {
         if self.n % self.d as i32 == 0 {
             self.n / self.d as i32
-        }
-        else {
-            (self.n / self.d as i32) + if self.n.is_negative() {-1} else {1}
+        } else {
+            (self.n / self.d as i32) + if self.n.is_negative() { -1 } else { 1 }
         }
     }
     pub fn is_zero(&self) -> bool {
@@ -83,16 +85,23 @@ impl From<i32> for Rational {
 
 impl fmt::Display for Rational {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.d == 1 { f.write_fmt(format_args!("{}", self.n)) }
-        else { f.write_fmt(format_args!("({}/{})", self.n, self.d)) }
+        if self.d == 1 {
+            f.write_fmt(format_args!("{}", self.n))
+        } else {
+            f.write_fmt(format_args!("({}/{})", self.n, self.d))
+        }
     }
 }
 
 impl Ord for Rational {
     fn cmp(&self, other: &Self) -> Ordering {
         let diff_n: i32 = (self.clone() - other.clone()).n;
-        if diff_n < 0 { return Ordering::Less; }
-        if diff_n > 0 { return Ordering::Greater; }
+        if diff_n < 0 {
+            return Ordering::Less;
+        }
+        if diff_n > 0 {
+            return Ordering::Greater;
+        }
         Ordering::Equal
     }
 }
@@ -105,8 +114,10 @@ impl PartialOrd for Rational {
 impl ops::Add for Rational {
     type Output = Self;
     fn add(self, rhs: Self) -> Self::Output {
-        Rational::new(self.n * rhs.d as i32 + rhs.n * self.d as i32,
-                      (self.d * rhs.d) as i32)
+        Rational::new(
+            self.n * rhs.d as i32 + rhs.n * self.d as i32,
+            (self.d * rhs.d) as i32,
+        )
     }
 }
 impl ops::AddAssign for Rational {
@@ -118,14 +129,16 @@ impl ops::AddAssign for Rational {
 impl ops::Neg for Rational {
     type Output = Self;
     fn neg(self) -> Self::Output {
-        Rational {n: -self.n, d:self.d}
+        Rational { n: -self.n, d: self.d }
     }
 }
 impl ops::Sub for Rational {
     type Output = Self;
     fn sub(self, rhs: Self) -> Self::Output {
-        Rational::new(self.n * rhs.d as i32 - rhs.n * self.d as i32,
-                      (self.d * rhs.d) as i32)
+        Rational::new(
+            self.n * rhs.d as i32 - rhs.n * self.d as i32,
+            (self.d * rhs.d) as i32,
+        )
     }
 }
 impl ops::SubAssign for Rational {
@@ -161,9 +174,9 @@ impl ops::BitXor<i32> for Rational {
     type Output = Self;
     fn bitxor(self, exp: i32) -> Self::Output {
         let b = if exp < 0 { Rational::ONE / self } else { self };
-        Rational { 
-            n: exponentiate(b.n, exp.unsigned_abs()), 
-            d: exponentiate(b.d, exp.unsigned_abs())
+        Rational {
+            n: exponentiate(b.n, exp.unsigned_abs()),
+            d: exponentiate(b.d, exp.unsigned_abs()),
         }
     }
 }
@@ -173,11 +186,15 @@ impl ops::BitXor<Rational> for Rational {
     fn bitxor(self, exp: Rational) -> Self::Output {
         match exp.d {
             1 => Some(self ^ exp.n),
-            exp_d => match (root_i64(self.n as i64, exp_d), root_u64(self.d as u64, exp_d)) {
-                (Some(Ok(n_root)), Ok(d_root)) =>
-                    Some(Rational { n: n_root as i32, d: d_root as u32, } ^ exp.n),
+            exp_d => match (
+                root_i64(self.n as i64, exp_d),
+                root_u64(self.d as u64, exp_d),
+            ) {
+                (Some(Ok(n_root)), Ok(d_root)) => {
+                    Some(Rational { n: n_root as i32, d: d_root as u32 } ^ exp.n)
+                }
                 _ => None,
-            }
+            },
         }
     }
 }
@@ -189,11 +206,9 @@ impl Rational {
     pub fn simplify_exp(self, exp: Self) -> Option<(Self, u32)> {
         if exp.d == 1 {
             Some((self ^ exp.n, 1))
-        }
-        else if (self.n < 0) && (exp.d & 1 == 0) {
+        } else if (self.n < 0) && (exp.d & 1 == 0) {
             None
-        }
-        else {
+        } else {
             let sign = self.n.signum();
             let mut root_index = exp.d;
             let (mut n, mut d): (u64, u64) = (self.n.unsigned_abs() as u64, self.d as u64);
@@ -204,14 +219,16 @@ impl Rational {
                         root_index /= index_factor;
                         match (root_u64(n, index_factor), root_u64(d, index_factor)) {
                             (Ok(n_root), Ok(d_root)) => (n, d) = (n_root, d_root),
-                            _ => unused_factors *= index_factor
+                            _ => unused_factors *= index_factor,
                         }
                     }
-                    None => break
+                    None => break,
                 }
             }
-            Some((Rational { n: sign * n as i32, d: d as u32, } ^ exp.n, 
-                root_index * unused_factors))
+            Some((
+                Rational { n: sign * n as i32, d: d as u32 } ^ exp.n,
+                root_index * unused_factors,
+            ))
         }
     }
 }
