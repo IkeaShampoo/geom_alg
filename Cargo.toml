@@ -1,7 +1,9 @@
 [package]
-name = "geometric_algebra"
-version = "0.0.0"
+name = "geom_alg"
+version = "1.0.0"
 edition = "2021"
 author = "Deegan Osmundson <dzosmundson@gmail.com>"
 
-[dependencies]
+[lib]
+name = "geom_alg"
+path = "src/lib.rs"
